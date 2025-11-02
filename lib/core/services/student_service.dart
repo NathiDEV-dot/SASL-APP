@@ -268,7 +268,7 @@ class StudentService {
             )
           ''').eq('id', lessonId).single();
 
-      return response as Map<String, dynamic>;
+      return response;
     } catch (e, stackTrace) {
       _logError('Error fetching lesson details: $lessonId', e, stackTrace);
       return {};
@@ -380,7 +380,7 @@ class StudentService {
           .eq('lesson_id', lessonId)
           .maybeSingle();
 
-      return response as Map<String, dynamic>?;
+      return response;
     } catch (e, stackTrace) {
       _logError(
         'Error fetching lesson progress for lesson $lessonId, student $studentCode',
@@ -453,6 +453,7 @@ class StudentService {
     );
   }
 
+  // ignore: unused_element
   void _logWarning(String message) {
     developer.log(
       message,

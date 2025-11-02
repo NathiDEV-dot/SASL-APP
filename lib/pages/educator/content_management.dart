@@ -21,6 +21,7 @@ class _ContentManagementState extends State<ContentManagement> {
   Map<String, dynamic> _stats = {};
   bool _isLoading = true;
   String _searchQuery = '';
+  // ignore: unused_field
   String? _currentEducatorId;
 
   @override
