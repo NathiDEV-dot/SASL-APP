@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:signsync_academy/core/constants/supabase_config.dart';
 import 'pages/shared/splash_screen.dart' as splash;
@@ -7,7 +7,7 @@ import 'pages/educator/auth_screen.dart';
 import 'pages/student/auth_screen.dart';
 import 'pages/parent/auth_screen.dart';
 import 'pages/educator/dashboard.dart';
-import 'pages/student/dashboard.dart';
+import 'pages/student/dashboard.dart' as student_dashboard; // ✅ Fixed: Added alias
 import 'pages/parent/dashboard.dart';
 import 'pages/student/lesson_viewer.dart';
 import 'pages/student/homework_submission.dart';
@@ -57,7 +57,7 @@ class SignSyncApp extends StatelessWidget {
         '/student/dashboard': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>?;
-          return StudentDashboard(
+          return student_dashboard.StudentDashboard( // ✅ Fixed: Using aliased import
             studentData: args ?? {},
           );
         },

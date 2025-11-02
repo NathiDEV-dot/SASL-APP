@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import 'package:signsync_academy/core/services/student_service.dart';
 import 'package:signsync_academy/pages/student/lesson_viewer.dart';
 import 'package:signsync_academy/pages/student/homework_submission.dart';
@@ -28,6 +29,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   List<Map<String, dynamic>> _popularLessons = [];
   List<Map<String, dynamic>> _gradeLessons = [];
   List<String> _gradeSubjects = [];
+  List<Map<String, dynamic>> _homeworkAssignments = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -35,6 +37,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
   late Map<String, dynamic> _studentInfo;
   late String _studentCode;
   late String _grade;
+
+  // Progress tracking
+  Map<String, String> _homeworkAnswers = {};
+  final Map<String, bool> _homeworkCompletion = {};
+  final Map<String, bool> _lessonCompletion = {};
+  int _totalLessons = 10; // Default total lessons
+  int _completedLessons = 0;
 
   @override
   void initState() {
@@ -46,6 +55,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
     _grade = _studentInfo['grade']?.toString() ?? 'unknown';
 
     _loadStudentData();
+    _loadHomeworkData();
+    _calculateProgress();
   }
 
   Future<void> _loadStudentData() async {
@@ -74,6 +85,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
           _gradeSubjects = results[5] as List<String>? ?? [];
           _isLoading = false;
         });
+
+        // Calculate total lessons from loaded data
+        _totalLessons = _newestLessons.length +
+            _recommendedLessons.length +
+            _popularLessons.length +
+            _gradeLessons.length;
+        _calculateProgress();
       }
     } catch (e) {
       _logError('Failed to load student dashboard data', e);
@@ -117,6 +135,31 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   Future<void> _refreshData() async {
     await _loadStudentData();
+    await _loadHomeworkData();
+  }
+
+  // Homework Methods
+  void _navigateToHomework(Map<String, dynamic> homework) {
+    _logInfo('Navigating to homework: ${homework['title']}');
+
+    if (homework['id'] == 'sasl_hl_p1_2023') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SASLHomeworkPage(
+            homework: homework,
+            answers: _homeworkAnswers,
+            onAnswersUpdate: (Map<String, String> updatedAnswers) {
+              setState(() {
+                _homeworkAnswers = updatedAnswers;
+                _homeworkCompletion[homework['id']] = true;
+                _calculateProgress(); // Update progress when homework is completed
+              });
+            },
+          ),
+        ),
+      );
+    }
   }
 
   // Private logging methods
@@ -655,6 +698,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
               offset: const Offset(0, 4),
             ),
           ],
+          border: Border.all(
+            color: isCompleted ? const Color(0xFF4CAF50) : Colors.transparent,
+            width: 2,
+          ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -996,6 +1043,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
+                      const Spacer(),
+                      if (isCompleted)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4CAF50).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Done',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF4CAF50),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ],
@@ -1525,6 +1590,750 @@ class _StudentDashboardState extends State<StudentDashboard> {
         return const Color(0xFFE91E63);
       default:
         return const Color(0xFF607D8B);
+    }
+  }
+}
+
+// Video Player Screen
+class VideoPlayerScreen extends StatefulWidget {
+  final Map<String, dynamic> lesson;
+  final VoidCallback onVideoCompleted;
+
+  const VideoPlayerScreen({
+    super.key,
+    required this.lesson,
+    required this.onVideoCompleted,
+  });
+
+  @override
+  State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
+}
+
+class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+  late VideoPlayerController _controller;
+  bool _isPlaying = false;
+  bool _isLoading = true;
+  bool _hasError = false;
+  bool _videoCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideoPlayer();
+  }
+
+  Future<void> _initializeVideoPlayer() async {
+    try {
+      // For demo purposes, using a sample video URL
+      // In production, you would use the actual video URL from the lesson data
+      final videoUrl = widget.lesson['video_url']?.toString() ??
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+
+      _controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl))
+        ..addListener(() {
+          if (_controller.value.isInitialized && !_isLoading) {
+            setState(() {});
+          }
+
+          // Check if video reached the end
+          if (_controller.value.position >= _controller.value.duration &&
+              _controller.value.duration > Duration.zero) {
+            if (!_videoCompleted) {
+              _videoCompleted = true;
+              widget.onVideoCompleted();
+            }
+          }
+        })
+        ..initialize().then((_) {
+          setState(() {
+            _isLoading = false;
+          });
+          _controller.setLooping(false);
+        });
+    } catch (e) {
+      setState(() {
+        _hasError = true;
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _togglePlayPause() {
+    setState(() {
+      if (_controller.value.isPlaying) {
+        _controller.pause();
+        _isPlaying = false;
+      } else {
+        _controller.play();
+        _isPlaying = true;
+      }
+    });
+  }
+
+  void _seekForward() {
+    final newPosition =
+        _controller.value.position + const Duration(seconds: 10);
+    _controller.seekTo(newPosition < _controller.value.duration
+        ? newPosition
+        : _controller.value.duration);
+  }
+
+  void _seekBackward() {
+    final newPosition =
+        _controller.value.position - const Duration(seconds: 10);
+    _controller
+        .seekTo(newPosition > Duration.zero ? newPosition : Duration.zero);
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(duration.inHours);
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+
+    if (duration.inHours > 0) {
+      return '$hours:$minutes:$seconds';
+    } else {
+      return '$minutes:$seconds';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.lesson['title']?.toString() ?? 'Video Lesson',
+          style: const TextStyle(fontSize: 16),
+        ),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+      ),
+      backgroundColor: Colors.black,
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            )
+          : _hasError
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline,
+                          size: 64, color: Colors.white),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Failed to load video',
+                        style: TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Please check your internet connection',
+                        style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _initializeVideoPlayer,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: [
+                    // Video Player
+                    AspectRatio(
+                      aspectRatio: _controller.value.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    ),
+
+                    // Video Controls
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      color: Colors.black87,
+                      child: Column(
+                        children: [
+                          // Progress Bar
+                          VideoProgressIndicator(
+                            _controller,
+                            allowScrubbing: true,
+                            colors: const VideoProgressColors(
+                              playedColor: Color(0xFF4CAF50),
+                              bufferedColor: Colors.grey,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Control Buttons
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              // Seek Backward
+                              IconButton(
+                                onPressed: _seekBackward,
+                                icon: const Icon(Icons.replay_10,
+                                    color: Colors.white, size: 30),
+                              ),
+
+                              // Play/Pause
+                              IconButton(
+                                onPressed: _togglePlayPause,
+                                icon: Icon(
+                                  _isPlaying ? Icons.pause : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 40,
+                                ),
+                              ),
+
+                              // Seek Forward
+                              IconButton(
+                                onPressed: _seekForward,
+                                icon: const Icon(Icons.forward_10,
+                                    color: Colors.white, size: 30),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 8),
+
+                          // Time Display
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                _formatDuration(_controller.value.position),
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              Text(
+                                _formatDuration(_controller.value.duration),
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Lesson Info
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        color: Colors.grey[900],
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.lesson['title']?.toString() ??
+                                    'Untitled Lesson',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              if (widget.lesson['description'] != null)
+                                Text(
+                                  widget.lesson['description'].toString(),
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.8),
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              const SizedBox(height: 16),
+                              if (_videoCompleted)
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4CAF50)
+                                        .withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: const Color(0xFF4CAF50)),
+                                  ),
+                                  child: const Row(
+                                    children: [
+                                      Icon(Icons.check_circle,
+                                          color: Color(0xFF4CAF50)),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Lesson completed! Progress updated.',
+                                        style: TextStyle(
+                                          color: Color(0xFF4CAF50),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+}
+
+// SASL Homework Page (keep the existing implementation)
+class SASLHomeworkPage extends StatefulWidget {
+  final Map<String, dynamic> homework;
+  final Map<String, String> answers;
+  final Function(Map<String, String>) onAnswersUpdate;
+
+  const SASLHomeworkPage({
+    super.key,
+    required this.homework,
+    required this.answers,
+    required this.onAnswersUpdate,
+  });
+
+  @override
+  State<SASLHomeworkPage> createState() => _SASLHomeworkPageState();
+}
+
+class _SASLHomeworkPageState extends State<SASLHomeworkPage> {
+  final Map<String, String> _currentAnswers = {};
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _currentAnswers.addAll(widget.answers);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('SASL Homework'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _saveProgress,
+          ),
+          IconButton(
+            icon: const Icon(Icons.assignment_turned_in),
+            onPressed: _submitHomework,
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Exam Header
+              _buildExamHeader(),
+              const SizedBox(height: 24),
+
+              // Instructions
+              _buildInstructions(),
+              const SizedBox(height: 32),
+
+              // Section A: Comprehension
+              _buildSectionA(),
+              const SizedBox(height: 32),
+
+              // Section B: Language Structures
+              _buildSectionB(),
+              const SizedBox(height: 32),
+
+              // Submit Button
+              _buildSubmitButton(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExamHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2196F3).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF2196F3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            widget.homework['title']?.toString() ?? 'SASL Homework',
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2196F3),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Total Marks: ${widget.homework['total_marks']} • Time: ${widget.homework['time_allowed']}',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Due: ${widget.homework['due_date']}',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[600],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInstructions() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'INSTRUCTIONS:',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.orange,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            '1. Answer ALL questions in both sections.\n'
+            '2. Write your answers in the spaces provided.\n'
+            '3. Pay attention to mark allocation for each question.\n'
+            '4. Use proper SASL grammar and structure in Section B.\n'
+            '5. Review your work before submitting.',
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionA() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'SECTION A: COMPREHENSION',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2196F3),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Answer ALL questions in this section.',
+            style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 16),
+
+          // Question 1.1
+          _buildQuestion(
+            '1.1',
+            'Watch the provided SASL video narrative and answer the following questions:',
+            15,
+          ),
+          const SizedBox(height: 16),
+
+          _buildSubQuestion(
+            '1.1.1',
+            'What is the main theme of the narrative? (3 marks)',
+            'q1_1_1',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '1.1.2',
+            'List THREE key events that occur in the narrative. (6 marks)',
+            'q1_1_2',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '1.1.3',
+            'Describe the relationship between the two main characters. (6 marks)',
+            'q1_1_3',
+          ),
+          const SizedBox(height: 16),
+
+          // Question 1.2
+          _buildQuestion(
+            '1.2',
+            'Based on the narrative, answer the following:',
+            10,
+          ),
+          const SizedBox(height: 16),
+
+          _buildSubQuestion(
+            '1.2.1',
+            'What cultural elements are represented in the story? Provide TWO examples. (4 marks)',
+            'q1_2_1',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '1.2.2',
+            'What is the significance of the setting in the narrative? (3 marks)',
+            'q1_2_2',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '1.2.3',
+            'How does the narrative conclude, and what message does it convey? (3 marks)',
+            'q1_2_3',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionB() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'SECTION B: LANGUAGE STRUCTURES AND CONVENTIONS',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2196F3),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Answer ALL questions in this section.',
+            style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 16),
+
+          // Question 2.1
+          _buildQuestion(
+            '2.1',
+            'SASL Grammar and Structure:',
+            20,
+          ),
+          const SizedBox(height: 16),
+
+          _buildSubQuestion(
+            '2.1.1',
+            'Explain the difference between directional verbs and plain verbs in SASL. Provide TWO examples of each. (8 marks)',
+            'q2_1_1',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '2.1.2',
+            'Describe how non-manual markers (facial expressions, body shifts) change the meaning of signs in SASL. Provide THREE examples. (6 marks)',
+            'q2_1_2',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '2.1.3',
+            'What is the role of classifiers in SASL? Provide TWO examples of how classifiers are used. (6 marks)',
+            'q2_1_3',
+          ),
+          const SizedBox(height: 16),
+
+          // Question 2.2
+          _buildQuestion(
+            '2.2',
+            'SASL Conversation and Dialogue:',
+            25,
+          ),
+          const SizedBox(height: 16),
+
+          _buildSubQuestion(
+            '2.2.1',
+            'Create a short SASL dialogue (8-10 sentences) between two friends discussing their weekend plans. Focus on proper turn-taking and question formation. (15 marks)',
+            'q2_2_1',
+            maxLines: 8,
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '2.2.2',
+            'Explain the cultural considerations you incorporated in your dialogue. (5 marks)',
+            'q2_2_2',
+          ),
+          const SizedBox(height: 12),
+
+          _buildSubQuestion(
+            '2.2.3',
+            'Identify THREE different sentence types used in your dialogue (declarative, interrogative, imperative, etc.). (5 marks)',
+            'q2_2_3',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuestion(String number, String text, int marks) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'QUESTION $number',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '[$marks marks]',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.red,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 14, height: 1.4),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubQuestion(String number, String text, String key,
+      {int maxLines = 4}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          number,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          text,
+          style: const TextStyle(fontSize: 14, height: 1.4),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          initialValue: _currentAnswers[key],
+          onChanged: (value) {
+            _currentAnswers[key] = value;
+          },
+          maxLines: maxLines,
+          decoration: const InputDecoration(
+            hintText: 'Type your answer here...',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.all(12),
+          ),
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return 'Please provide an answer';
+            }
+            return null;
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _submitHomework,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF4CAF50),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        child: const Text(
+          'SUBMIT HOMEWORK',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  void _saveProgress() {
+    widget.onAnswersUpdate(_currentAnswers);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Progress saved successfully!'),
+        backgroundColor: Colors.blue,
+      ),
+    );
+  }
+
+  void _submitHomework() {
+    if (_formKey.currentState!.validate()) {
+      widget.onAnswersUpdate(_currentAnswers);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Homework submitted successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete all required questions.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 }

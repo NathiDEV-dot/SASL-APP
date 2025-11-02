@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path/path.dart' as path;
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
+import 'package:image_picker/image_picker.dart';
 
 class LessonCreationService {
   final SupabaseClient _client = Supabase.instance.client;
