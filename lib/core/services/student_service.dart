@@ -380,6 +380,48 @@ class StudentService {
     }
   }
 
+  // ADDED: Get homework assignments for student
+  Future<List<Map<String, dynamic>>> getHomeworkAssignments(
+      String studentCode) async {
+    try {
+      // First get student info to determine grade
+      final studentResponse = await _supabase
+          .from('pre_verified_users')
+          .select('grade')
+          .eq('student_code', studentCode)
+          .single();
+
+      final grade = studentResponse['grade'] as String? ?? 'unknown';
+
+      // Try to fetch from database first
+      final response = await _supabase
+          .from('homework_assignments')
+          .select('''
+            *,
+            subjects:subject_id(name),
+            educators:educator_id(first_name, last_name)
+          ''')
+          .eq('student_grade', grade)
+          .eq('is_active', true)
+          .order('due_date', ascending: true);
+
+      if (response != null && response.isNotEmpty) {
+        _logInfo(
+            'Fetched ${response.length} homework assignments from database for grade: $grade');
+        return (response as List).cast<Map<String, dynamic>>();
+      }
+
+      // If no assignments in database, return empty list
+      _logInfo('No homework assignments found in database for grade: $grade');
+      return [];
+    } catch (e, stackTrace) {
+      _logError('Error fetching homework assignments for student: $studentCode',
+          e, stackTrace);
+      // Return empty list instead of throwing error to prevent app crash
+      return [];
+    }
+  }
+
   // Private logging methods
   void _logError(String message, dynamic error, StackTrace stackTrace) {
     developer.log(
