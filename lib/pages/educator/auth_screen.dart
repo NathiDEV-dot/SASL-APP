@@ -103,8 +103,9 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
     );
 
     if (authResponse != null && authResponse.user != null) {
+      // Use the correct method name: getEducatorProfileById
       final educatorInfo =
-          await _authService.getEducatorProfile(authResponse.user!.id);
+          await _authService.getEducatorProfileById(authResponse.user!.id);
       final educatorName = educatorInfo != null
           ? '${educatorInfo['first_name']} ${educatorInfo['last_name']}'
           : 'Educator';

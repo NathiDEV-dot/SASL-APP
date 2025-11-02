@@ -1,6 +1,8 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
+import 'package:signsync_academy/core/services/submission_service.dart';
+import 'services/submission_service.dart';
 
 class ReviewSubmissions extends StatefulWidget {
   const ReviewSubmissions({super.key});
@@ -13,74 +15,38 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
   int _selectedFilter = 0; // 0: All, 1: Pending, 2: Graded
   final List<String> _filters = ['All', 'Pending', 'Graded'];
 
-  final List<Map<String, dynamic>> _submissions = [
-    {
-      'student': 'Sarah Johnson',
-      'assignment': 'Math: Algebra Basics',
-      'submitted': '2 hours ago',
-      'status': 'pending',
-      'grade': null,
-      'avatar': 'SJ',
-      'subject': 'Mathematics',
-      'dueDate': 'Due yesterday',
-      'priority': 'high',
-    },
-    {
-      'student': 'Mike Wilson',
-      'assignment': 'Science Lab Report - Chemical Reactions',
-      'submitted': '5 hours ago',
-      'status': 'graded',
-      'grade': 'A-',
-      'avatar': 'MW',
-      'subject': 'Science',
-      'dueDate': 'Due today',
-      'priority': 'medium',
-    },
-    {
-      'student': 'Lisa Chen',
-      'assignment': 'History Essay: World War II Analysis',
-      'submitted': '1 day ago',
-      'status': 'pending',
-      'grade': null,
-      'avatar': 'LC',
-      'subject': 'History',
-      'dueDate': 'Due in 2 days',
-      'priority': 'low',
-    },
-    {
-      'student': 'David Brown',
-      'assignment': 'Math: Geometry Final Project',
-      'submitted': '2 days ago',
-      'status': 'graded',
-      'grade': 'B+',
-      'avatar': 'DB',
-      'subject': 'Mathematics',
-      'dueDate': 'Due 3 days ago',
-      'priority': 'medium',
-    },
-    {
-      'student': 'Emma Garcia',
-      'assignment': 'Physics: Motion and Forces',
-      'submitted': '3 hours ago',
-      'status': 'pending',
-      'grade': null,
-      'avatar': 'EG',
-      'subject': 'Physics',
-      'dueDate': 'Due tomorrow',
-      'priority': 'high',
-    },
-    {
-      'student': 'Alex Thompson',
-      'assignment': 'Literature: Poetry Analysis',
-      'submitted': '6 hours ago',
-      'status': 'graded',
-      'grade': 'A',
-      'avatar': 'AT',
-      'subject': 'Literature',
-      'dueDate': 'Due today',
-      'priority': 'medium',
-    },
-  ];
+  final SubmissionService _submissionService = SubmissionService();
+  List<Map<String, dynamic>> _submissions = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubmissions();
+  }
+
+  Future<void> _loadSubmissions() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final submissions = await _submissionService.getEducatorSubmissions();
+      setState(() {
+        _submissions = submissions;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString();
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   List<Map<String, dynamic>> get _filteredSubmissions {
     if (_selectedFilter == 0) return _submissions;
@@ -88,6 +54,27 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
       return _submissions.where((s) => s['status'] == 'pending').toList();
     }
     return _submissions.where((s) => s['status'] == 'graded').toList();
+  }
+
+  Map<String, dynamic> _getSubmissionStats() {
+    final pendingCount =
+        _submissions.where((s) => s['status'] == 'pending').length;
+    final gradedCount =
+        _submissions.where((s) => s['status'] == 'graded').length;
+    final overdueCount = _submissions.where((s) {
+      final dueDate =
+          s['due_date'] != null ? DateTime.parse(s['due_date']) : null;
+      return dueDate != null &&
+          dueDate.isBefore(DateTime.now()) &&
+          s['status'] == 'pending';
+    }).length;
+
+    return {
+      'pending': pendingCount,
+      'graded': gradedCount,
+      'overdue': overdueCount,
+      'total': _submissions.length,
+    };
   }
 
   @override
@@ -107,33 +94,41 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
             onPressed: _searchSubmissions,
           ),
           IconButton(
-            icon: Icon(Icons.sort, color: _getTextColor()),
-            onPressed: _sortSubmissions,
+            icon: Icon(Icons.refresh, color: _getTextColor()),
+            onPressed: _loadSubmissions,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Stats Overview
-          _buildStatsSection(),
+      body: _isLoading
+          ? _buildLoadingState()
+          : _errorMessage.isNotEmpty
+              ? _buildErrorState()
+              : Column(
+                  children: [
+                    // Stats Overview
+                    _buildStatsSection(),
 
-          // Filter Chips
-          _buildFilterSection(),
+                    // Filter Chips
+                    _buildFilterSection(),
 
-          // Submissions List
-          Expanded(
-            child: _filteredSubmissions.isEmpty
-                ? _buildEmptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _filteredSubmissions.length,
-                    itemBuilder: (context, index) {
-                      return _buildSubmissionCard(_filteredSubmissions[index]);
-                    },
-                  ),
-          ),
-        ],
-      ),
+                    // Submissions List
+                    Expanded(
+                      child: _filteredSubmissions.isEmpty
+                          ? _buildEmptyState()
+                          : RefreshIndicator(
+                              onRefresh: _loadSubmissions,
+                              child: ListView.builder(
+                                padding: const EdgeInsets.all(16),
+                                itemCount: _filteredSubmissions.length,
+                                itemBuilder: (context, index) {
+                                  return _buildSubmissionCard(
+                                      _filteredSubmissions[index]);
+                                },
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
       floatingActionButton: FloatingActionButton(
         onPressed: _quickGrade,
         backgroundColor: _getPrimaryColor(),
@@ -144,15 +139,69 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
     );
   }
 
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: _getPrimaryColor()),
+          const SizedBox(height: 16),
+          Text(
+            'Loading submissions...',
+            style: TextStyle(
+              color: _getTextColor().withOpacity(0.7),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            size: 64,
+            color: Colors.red.withOpacity(0.7),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Error loading submissions',
+            style: TextStyle(
+              color: _getTextColor(),
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage,
+            style: TextStyle(
+              color: _getTextColor().withOpacity(0.6),
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _loadSubmissions,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _getPrimaryColor(),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatsSection() {
-    final pendingCount =
-        _submissions.where((s) => s['status'] == 'pending').length;
-    final gradedCount =
-        _submissions.where((s) => s['status'] == 'graded').length;
-    final overdueCount = _submissions
-        .where((s) =>
-            s['dueDate']?.contains('ago') == true && s['status'] == 'pending')
-        .length;
+    final stats = _getSubmissionStats();
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -179,19 +228,19 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _buildStatItem(
-            pendingCount.toString(),
+            stats['pending'].toString(),
             'Pending',
             Icons.pending_actions_rounded,
             Colors.orange,
           ),
           _buildStatItem(
-            gradedCount.toString(),
+            stats['graded'].toString(),
             'Graded',
             Icons.assignment_turned_in_rounded,
             Colors.green,
           ),
           _buildStatItem(
-            overdueCount.toString(),
+            stats['overdue'].toString(),
             'Overdue',
             Icons.warning_amber_rounded,
             Colors.red,
@@ -281,7 +330,14 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
 
   Widget _buildSubmissionCard(Map<String, dynamic> submission) {
     final isPending = submission['status'] == 'pending';
-    final priorityColor = _getPriorityColor(submission['priority']);
+    final student = submission['students'] ?? {};
+    final assignment = submission['assignments'] ?? {};
+    final dueDate = submission['due_date'] != null
+        ? DateTime.parse(submission['due_date'])
+        : null;
+
+    final priority = _getPriorityLevel(dueDate, isPending);
+    final priorityColor = _getPriorityColor(priority);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -317,22 +373,26 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
                       width: 60,
                       height: 60,
                       decoration: BoxDecoration(
-                        color: _getSubjectColor(submission['subject'])
-                            .withOpacity(0.15),
+                        color:
+                            _getSubjectColor(assignment['subject'] ?? 'General')
+                                .withOpacity(0.15),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: _getSubjectColor(submission['subject'])
+                          color: _getSubjectColor(
+                                  assignment['subject'] ?? 'General')
                               .withOpacity(0.3),
                           width: 2,
                         ),
                       ),
                       child: Center(
                         child: Text(
-                          submission['avatar'],
+                          _getStudentInitials(student['first_name'] ?? '',
+                              student['last_name'] ?? ''),
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: _getSubjectColor(submission['subject']),
+                            color: _getSubjectColor(
+                                assignment['subject'] ?? 'General'),
                           ),
                         ),
                       ),
@@ -366,7 +426,7 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
                         children: [
                           Expanded(
                             child: Text(
-                              submission['student'],
+                              '${student['first_name'] ?? ''} ${student['last_name'] ?? ''}',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -379,7 +439,7 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        submission['assignment'],
+                        assignment['title'] ?? 'No Title',
                         style: TextStyle(
                           fontSize: 16,
                           color: _getTextColor().withOpacity(0.8),
@@ -396,7 +456,7 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
                               color: _getTextColor().withOpacity(0.6)),
                           const SizedBox(width: 4),
                           Text(
-                            submission['submitted'],
+                            _formatSubmittedTime(submission['submitted_at']),
                             style: TextStyle(
                               fontSize: 12,
                               color: _getTextColor().withOpacity(0.6),
@@ -408,10 +468,10 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
                               color: _getTextColor().withOpacity(0.6)),
                           const SizedBox(width: 4),
                           Text(
-                            submission['dueDate'],
+                            _formatDueDate(dueDate),
                             style: TextStyle(
                               fontSize: 12,
-                              color: _getDueDateColor(submission['dueDate']),
+                              color: _getDueDateColor(dueDate),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -432,6 +492,7 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
 
   Widget _buildStatusBadge(Map<String, dynamic> submission) {
     final isPending = submission['status'] == 'pending';
+    final grade = submission['grade'];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -455,7 +516,7 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
           ),
           const SizedBox(width: 4),
           Text(
-            isPending ? 'Pending' : 'Graded ${submission['grade']}',
+            isPending ? 'Pending' : 'Graded ${grade ?? ""}',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -536,6 +597,52 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
     );
   }
 
+  // Helper methods
+  String _getStudentInitials(String firstName, String lastName) {
+    if (firstName.isEmpty && lastName.isEmpty) return '?';
+    return '${firstName.isNotEmpty ? firstName[0] : ''}${lastName.isNotEmpty ? lastName[0] : ''}'
+        .toUpperCase();
+  }
+
+  String _formatSubmittedTime(String? submittedAt) {
+    if (submittedAt == null) return 'Unknown';
+
+    final submitted = DateTime.parse(submittedAt);
+    final now = DateTime.now();
+    final difference = now.difference(submitted);
+
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
+    if (difference.inHours < 24) return '${difference.inHours}h ago';
+    return '${difference.inDays}d ago';
+  }
+
+  String _formatDueDate(DateTime? dueDate) {
+    if (dueDate == null) return 'No due date';
+
+    final now = DateTime.now();
+    final difference = dueDate.difference(now);
+
+    if (difference.inDays == 0) return 'Due today';
+    if (difference.inDays == 1) return 'Due tomorrow';
+    if (difference.inDays > 1) return 'Due in ${difference.inDays} days';
+    if (difference.inDays == -1) return 'Due yesterday';
+    return 'Due ${difference.inDays.abs()} days ago';
+  }
+
+  String _getPriorityLevel(DateTime? dueDate, bool isPending) {
+    if (!isPending) return 'low';
+    if (dueDate == null) return 'medium';
+
+    final now = DateTime.now();
+    final difference = dueDate.difference(now);
+
+    if (difference.inDays < 0) return 'high'; // Overdue
+    if (difference.inDays == 0) return 'high'; // Due today
+    if (difference.inDays <= 2) return 'medium'; // Due in 2 days
+    return 'low';
+  }
+
   Color _getPriorityColor(String priority) {
     switch (priority) {
       case 'high':
@@ -550,30 +657,34 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
   }
 
   Color _getSubjectColor(String subject) {
-    switch (subject) {
-      case 'Mathematics':
+    switch (subject.toLowerCase()) {
+      case 'mathematics':
+      case 'math':
         return const Color(0xFF3B82F6);
-      case 'Science':
+      case 'science':
         return const Color(0xFF10B981);
-      case 'History':
+      case 'history':
         return const Color(0xFFF59E0B);
-      case 'Physics':
+      case 'physics':
         return const Color(0xFFEF4444);
-      case 'Literature':
+      case 'literature':
+      case 'english':
         return const Color(0xFF8B5CF6);
       default:
         return const Color(0xFF6B7280);
     }
   }
 
-  Color _getDueDateColor(String dueDate) {
-    if (dueDate.contains('ago')) return Colors.red;
-    if (dueDate.contains('today') || dueDate.contains('tomorrow')) {
-      return Colors.orange;
-    }
+  Color _getDueDateColor(DateTime? dueDate) {
+    if (dueDate == null) return _getTextColor().withOpacity(0.6);
+
+    final now = DateTime.now();
+    if (dueDate.isBefore(now)) return Colors.red;
+    if (dueDate.difference(now).inDays == 0) return Colors.orange;
     return _getTextColor().withOpacity(0.6);
   }
 
+  // Action methods
   void _gradeSubmission(Map<String, dynamic> submission) {
     showModalBottomSheet(
       context: context,
@@ -584,9 +695,11 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
   }
 
   void _viewSubmission(Map<String, dynamic> submission) {
+    // Navigate to submission detail page or show video
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Viewing submission from ${submission['student']}'),
+        content: Text(
+            'Viewing submission from ${submission['students']?['first_name'] ?? 'Student'}'),
         backgroundColor: _getPrimaryColor(),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -594,49 +707,50 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
     );
   }
 
-  void _searchSubmissions() {
-    // Implement search functionality
+  Future<void> _searchSubmissions() async {
+    final result = await showSearch(
+      context: context,
+      delegate: _SubmissionSearchDelegate(_submissionService),
+    );
+
+    if (result != null) {
+      // Handle search result
+    }
   }
 
-  void _sortSubmissions() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: _getCardColor(),
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
+  void _quickGrade() {
+    // Implement quick grade functionality for multiple submissions
+  }
+
+  Widget _buildGradingSheet(Map<String, dynamic> submission) {
+    // Implement grading sheet with form
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _getCardColor(),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Sort By',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: _getTextColor(),
-              ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Grade Submission',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: _getTextColor(),
             ),
-            const SizedBox(height: 16),
-            // Add sort options here
-          ],
-        ),
+          ),
+          // Add grading form here
+        ],
       ),
     );
   }
 
-  void _quickGrade() {
-    // Implement quick grade functionality
-  }
-
-  Widget _buildGradingSheet(Map<String, dynamic> submission) {
-    return Container(); // Implement grading sheet
-  }
-
+  // Theme methods
   Color _getBackgroundColor() {
     return Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF0F0F1E)
@@ -663,5 +777,72 @@ class _ReviewSubmissionsState extends State<ReviewSubmissions> {
 
   Color _getPrimaryColor() {
     return const Color(0xFF3B82F6);
+  }
+}
+
+// Search delegate for submissions
+class _SubmissionSearchDelegate extends SearchDelegate {
+  final SubmissionService _submissionService;
+
+  _SubmissionSearchDelegate(this._submissionService);
+
+  @override
+  List<Widget> buildActions(BuildContext context) {
+    return [
+      IconButton(
+        icon: const Icon(Icons.clear),
+        onPressed: () {
+          query = '';
+        },
+      ),
+    ];
+  }
+
+  @override
+  Widget buildLeading(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back),
+      onPressed: () {
+        close(context, null);
+      },
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _submissionService.searchSubmissions(query),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final results = snapshot.data ?? [];
+
+        return ListView.builder(
+          itemCount: results.length,
+          itemBuilder: (context, index) {
+            final submission = results[index];
+            return ListTile(
+              title: Text(
+                  '${submission['students']?['first_name']} ${submission['students']?['last_name']}'),
+              subtitle: Text(submission['assignments']?['title'] ?? ''),
+              onTap: () {
+                close(context, submission);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    return Container(); // Return empty for now
   }
 }

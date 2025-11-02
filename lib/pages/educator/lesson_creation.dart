@@ -1,28 +1,15 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, unused_field, unused_import
 
-import 'dart:io';
-// ignore: unused_import
-import 'dart:math';
-import 'dart:async';
-// ignore: unnecessary_import
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as path;
+import 'dart:io';
 import 'package:video_player/video_player.dart';
-import 'package:chewie/chewie.dart';
-
-// Web-specific imports
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
-
-import '../../../core/services/lesson_creation_service.dart';
-import '../../../core/models/lesson_data.dart';
+import '../../core/services/lesson_creation_service.dart';
+import 'video_editor.dart';
 
 class LessonCreation extends StatefulWidget {
-  const LessonCreation({super.key});
+  const LessonCreation({Key? key}) : super(key: key);
 
   @override
   State<LessonCreation> createState() => _LessonCreationState();
@@ -30,57 +17,43 @@ class LessonCreation extends StatefulWidget {
 
 class _LessonCreationState extends State<LessonCreation> {
   final LessonCreationService _lessonService = LessonCreationService();
-  late LessonData _lessonData;
+  final _formKey = GlobalKey<FormState>();
+
+  // Form fields
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
 
-  // UI State only
+  String _selectedSubject = 'Mathematics';
+  String _selectedGrade = 'Grade 10';
+  File? _selectedVideo;
   bool _isUploading = false;
   double _uploadProgress = 0.0;
-  String? _uploadError;
-  String? _temporaryVideoPath;
-  Uint8List? _webVideoBytes;
-  String? _webVideoFileName;
-  bool _isRecording = false;
-  bool _isPaused = false;
-  Duration _recordingTime = const Duration();
-  bool _isExtractingDuration = false;
-  Timer? _recordingTimer;
+  bool _scheduleForLater = false;
+  DateTime? _scheduledDate;
+  String? _videoDuration;
 
-  // Video player controllers
-  VideoPlayerController? _videoPlayerController;
-  ChewieController? _chewieController;
-  bool _isVideoLoading = false;
-  bool _hasVideoError = false;
+  // Video player controller for preview
+  VideoPlayerController? _videoController;
+  bool _isVideoInitializing = false;
+  bool _isVideoPlaying = false;
 
-  // Database fetched data
   List<String> _availableSubjects = [];
-  String _educatorGrade = '';
-  bool _isLoadingData = true;
 
-  // Professional color palette
+  // Colors
   final Color _primaryColor = const Color(0xFF4361EE);
-  final Color _successColor = const Color(0xFF10B981);
+  final Color _secondaryColor = const Color(0xFF3A0CA3);
+  final Color _accentColor = const Color(0xFF4CC9F0);
+  final Color _successColor = const Color(0xFF4ADE80);
   final Color _warningColor = const Color(0xFFF59E0B);
   final Color _errorColor = const Color(0xFFEF4444);
-  final Color _infoColor = const Color(0xFF3B82F6);
+  final Color _backgroundColor = const Color(0xFFF8FAFC);
+  final Color _cardColor = Colors.white;
+  final Color _textColor = const Color(0xFF1E293B);
+  final Color _hintColor = const Color(0xFF64748B);
 
   @override
   void initState() {
     super.initState();
-    _lessonData = LessonData(
-      title: _titleController.text,
-      description: _descriptionController.text,
-      subject: '',
-      grade: '',
-      durationText: 'Duration will be auto-detected',
-      videoFile: null,
-      publishImmediately: true,
-      scheduledDate: null,
-    );
-
-    _titleController.addListener(_updateLessonData);
-    _descriptionController.addListener(_updateLessonData);
     _loadEducatorData();
   }
 
@@ -88,9 +61,7 @@ class _LessonCreationState extends State<LessonCreation> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _recordingTimer?.cancel();
-    _videoPlayerController?.dispose();
-    _chewieController?.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -98,1685 +69,1611 @@ class _LessonCreationState extends State<LessonCreation> {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        _educatorGrade = await _lessonService.getEducatorGrade(user.id);
-        _availableSubjects = await _lessonService.getEducatorSubjects(user.id);
+        final subjects = await _lessonService.getEducatorSubjects(user.id);
+        final grade = await _lessonService.getEducatorGrade(user.id);
 
         setState(() {
-          _lessonData = _lessonData.copyWith(
-            grade: _educatorGrade,
-            subject:
-                _availableSubjects.isNotEmpty ? _availableSubjects.first : '',
-          );
-          _isLoadingData = false;
+          _availableSubjects = subjects;
+          _selectedSubject =
+              subjects.isNotEmpty ? subjects.first : 'Mathematics';
+          _selectedGrade = grade;
         });
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('Error loading educator data: $e');
-      }
-      setState(() {
-        _isLoadingData = false;
-      });
+      debugPrint('Error loading educator data: $e');
     }
   }
 
-  void _updateLessonData() {
-    setState(() {
-      _lessonData = _lessonData.copyWith(
-        title: _titleController.text,
-        description: _descriptionController.text,
-      );
-    });
+  Future<void> _pickVideo() async {
+    try {
+      final videoFile = await _lessonService.pickVideo();
+      if (videoFile != null) {
+        await _handleVideoSelected(videoFile);
+      }
+    } catch (e) {
+      _showErrorDialog('Video Selection Error', e.toString());
+    }
   }
 
-  // ========== VIDEO HANDLING METHODS ==========
-
-  Future<void> _uploadVideo() async {
+  Future<void> _recordVideo() async {
     try {
       setState(() {
-        _uploadError = null;
-        _hasVideoError = false;
-        _webVideoBytes = null;
-        _webVideoFileName = null;
+        _isVideoInitializing = true;
       });
 
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
-        allowMultiple: false,
+      final videoFile = await _lessonService.recordVideo();
+
+      if (videoFile != null) {
+        await _handleVideoSelected(videoFile);
+      }
+    } catch (e) {
+      _showErrorDialog('Recording Failed', e.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVideoInitializing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleVideoSelected(File videoFile) async {
+    try {
+      _lessonService.validateVideoFile(videoFile);
+
+      // Dispose previous controller
+      await _disposeVideoController();
+
+      setState(() {
+        _selectedVideo = videoFile;
+        _videoDuration = null;
+        _isVideoInitializing = true;
+        _isVideoPlaying = false;
+      });
+
+      // Get actual video duration
+      final duration = await _lessonService.getVideoDuration(videoFile);
+      setState(() {
+        _videoDuration =
+            '${duration.inMinutes}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
+      });
+
+      // Initialize video controller for preview
+      _videoController = VideoPlayerController.file(videoFile);
+      await _videoController!.initialize();
+
+      // Add listener to track play state
+      _videoController!.addListener(() {
+        if (mounted) {
+          setState(() {
+            _isVideoPlaying = _videoController!.value.isPlaying;
+          });
+        }
+      });
+
+      setState(() {
+        _isVideoInitializing = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isVideoInitializing = false;
+      });
+      _showErrorDialog('Video Error', e.toString());
+    }
+  }
+
+  Future<void> _disposeVideoController() async {
+    if (_videoController != null) {
+      await _videoController!.pause();
+      await _videoController!.dispose();
+      _videoController = null;
+    }
+  }
+
+  Future<void> _replaceVideo() async {
+    try {
+      // Show options to pick from gallery or record new video
+      final source = await showDialog<ImageSource>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Replace Video'),
+          content: const Text('Choose how you want to replace the video:'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, ImageSource.gallery),
+              child: const Text('Choose from Gallery'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, ImageSource.camera),
+              child: const Text('Record New Video'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.single;
-
-        if (kIsWeb) {
-          if (file.bytes == null) {
-            throw Exception('Unable to access video file on web');
-          }
-
-          _temporaryVideoPath = file.name;
-          _webVideoBytes = file.bytes!;
-          _webVideoFileName = file.name;
-
-          setState(() {
-            _lessonData = _lessonData.copyWith(
-              videoFile: null,
-              durationText: 'Calculating duration...',
-            );
-            _isExtractingDuration = true;
-          });
-
-          final estimatedDuration =
-              await _estimateVideoDurationWeb(file.bytes!.length);
-
-          setState(() {
-            _lessonData = _lessonData.copyWith(
-              videoDuration: estimatedDuration,
-              durationText: _formatDurationForDisplay(estimatedDuration),
-            );
-            _isExtractingDuration = false;
-          });
-
-          await _initializeWebVideoPreview(file.bytes!, file.name);
-          _showFileSelected(file);
+      if (source != null) {
+        final File? newVideoFile;
+        if (source == ImageSource.gallery) {
+          newVideoFile = await _lessonService.pickVideo();
         } else {
-          if (file.path == null) {
-            throw Exception('Unable to access video file path');
-          }
+          newVideoFile = await _lessonService.recordVideo();
+        }
 
-          final videoFile = File(file.path!);
-          _temporaryVideoPath = file.path!;
-
-          final ext = path.extension(file.name).toLowerCase();
-          final validExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-
-          if (!validExtensions.contains(ext)) {
-            throw Exception(
-                'Invalid video format. Supported: MP4, MOV, AVI, MKV, WEBM');
-          }
-
-          _lessonService.validateVideoFile(file);
-
-          setState(() {
-            _lessonData = _lessonData.copyWith(
-              videoFile: videoFile,
-              durationText: 'Calculating duration...',
-            );
-            _isExtractingDuration = true;
-          });
-
-          final duration = await _lessonService.getVideoDuration(videoFile);
-
-          setState(() {
-            _lessonData = _lessonData.copyWith(
-              videoDuration: duration,
-              durationText: _formatDurationForDisplay(duration),
-            );
-            _isExtractingDuration = false;
-          });
-
-          await _initializeVideoPlayer(videoFile: videoFile);
-          _showFileSelected(file);
+        if (newVideoFile != null) {
+          await _handleVideoSelected(newVideoFile);
+          _showSuccessSnackbar('Video replaced successfully!');
         }
       }
     } catch (e) {
-      _handleUploadError(e);
+      _showErrorDialog('Replace Video Error', e.toString());
     }
   }
 
-  Future<void> _initializeWebVideoPreview(
-      Uint8List videoBytes, String fileName) async {
+  Future<void> _editVideo() async {
+    if (_selectedVideo == null) return;
+
     try {
-      setState(() {
-        _isVideoLoading = true;
-        _hasVideoError = false;
-      });
-
-      await _videoPlayerController?.dispose();
-      _chewieController?.dispose();
-
-      final blobUrl = await _createBlobUrl(videoBytes);
-
-      if (blobUrl != null) {
-        _videoPlayerController = VideoPlayerController.network(blobUrl);
-        await _videoPlayerController!.initialize();
-
-        _chewieController = ChewieController(
-          videoPlayerController: _videoPlayerController!,
-          autoPlay: false,
-          looping: false,
-          allowFullScreen: true,
-          allowMuting: true,
-          showControls: true,
-          materialProgressColors: ChewieProgressColors(
-            playedColor: _primaryColor,
-            handleColor: _primaryColor,
-            backgroundColor: Colors.grey,
-            bufferedColor: Colors.grey.withOpacity(0.5),
-          ),
-          placeholder: Container(
-            color: Colors.grey.shade900,
-            child: const Center(
-              child:
-                  Icon(Icons.videocam_rounded, color: Colors.white, size: 50),
-            ),
-          ),
-          errorBuilder: (context, errorMessage) {
-            return Container(
-              color: Colors.grey.shade900,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error_outline_rounded,
-                        color: _errorColor, size: 50),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Error playing video preview',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Video will be available after upload',
-                      style: TextStyle(color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-
-        setState(() {
-          _isVideoLoading = false;
-        });
-      } else {
-        throw Exception('Could not create video preview');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('Web video preview error: $e');
-      }
-      setState(() {
-        _isVideoLoading = false;
-        _hasVideoError = true;
-      });
-    }
-  }
-
-  Future<String?> _createBlobUrl(Uint8List bytes) async {
-    try {
-      if (kIsWeb) {
-        final blob = html.Blob([bytes], 'video/mp4');
-        return html.Url.createObjectUrlFromBlob(blob);
-      }
-      return null;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error creating blob URL: $e');
-      }
-      return null;
-    }
-  }
-
-  Future<void> _initializeVideoPlayer(
-      {File? videoFile, String? videoUrl}) async {
-    try {
-      setState(() {
-        _isVideoLoading = true;
-        _hasVideoError = false;
-      });
-
-      await _videoPlayerController?.dispose();
-      _chewieController?.dispose();
-
-      if (videoFile != null) {
-        _videoPlayerController = VideoPlayerController.file(videoFile);
-      } else if (videoUrl != null && videoUrl.isNotEmpty) {
-        _videoPlayerController = VideoPlayerController.network(videoUrl);
-      } else {
-        throw Exception('No video source provided');
-      }
-
-      await _videoPlayerController!.initialize();
-
-      _chewieController = ChewieController(
-        videoPlayerController: _videoPlayerController!,
-        autoPlay: false,
-        looping: false,
-        allowFullScreen: true,
-        allowMuting: true,
-        showControls: true,
-        materialProgressColors: ChewieProgressColors(
-          playedColor: _primaryColor,
-          handleColor: _primaryColor,
-          backgroundColor: Colors.grey,
-          bufferedColor: Colors.grey.withOpacity(0.5),
-        ),
-        placeholder: Container(
-          color: Colors.grey.shade900,
-          child: const Center(
-            child: Icon(Icons.videocam_rounded, color: Colors.white, size: 50),
+      final editedFile = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => VideoEditor(
+            initialVideo: _selectedVideo!,
+            lessonTitle: _titleController.text.isEmpty
+                ? 'Edit Video'
+                : _titleController.text,
           ),
         ),
-        errorBuilder: (context, errorMessage) {
-          return Container(
-            color: Colors.grey.shade900,
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline_rounded,
-                      color: _errorColor, size: 50),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Error playing video',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    errorMessage,
-                    style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
       );
 
-      setState(() {
-        _isVideoLoading = false;
-      });
+      if (editedFile != null) {
+        await _handleVideoSelected(editedFile);
+        _showSuccessSnackbar('Video edited successfully!');
+      }
     } catch (e) {
-      setState(() {
-        _isVideoLoading = false;
-        _hasVideoError = true;
-      });
+      _showErrorDialog('Video Editing Error', e.toString());
     }
   }
 
-  Future<Duration> _estimateVideoDurationWeb(int fileSizeBytes) async {
-    // More accurate estimation based on typical video bitrates
-    // Average bitrate: ~1-2 Mbps for standard quality, ~4-8 Mbps for HD
-    const averageBitrateMbps = 2.0; // Conservative estimate
-    final fileSizeBits = fileSizeBytes * 8;
-    final durationSeconds = fileSizeBits / (averageBitrateMbps * 1000000);
-
-    final estimatedMinutes = (durationSeconds / 60).ceil();
-    return Duration(minutes: estimatedMinutes.clamp(1, 180));
-  }
-
-  String _formatDurationForDisplay(Duration duration) {
-    if (duration.inHours > 0) {
-      return '${duration.inHours}h ${duration.inMinutes.remainder(60)}m';
-    } else if (duration.inMinutes > 0) {
-      return '${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s';
-    } else {
-      return '${duration.inSeconds}s';
+  Future<void> _createLesson() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedVideo == null) {
+      _showErrorDialog(
+          'Missing Video', 'Please select or record a video for your lesson.');
+      return;
     }
-  }
 
-  // ========== UPLOAD METHODS ==========
-
-  Future<String> _uploadVideoToServer({
-    required String lessonId,
-    required String educatorId,
-    required File videoFile,
-    required Function(double) onProgress,
-  }) async {
-    try {
-      final videoUrl = await _lessonService.uploadVideo(
-        lessonId: lessonId,
-        educatorId: educatorId,
-        videoFile: videoFile,
-        onProgress: onProgress,
-      );
-      return videoUrl;
-    } catch (e) {
-      throw Exception('Failed to upload video: ${e.toString()}');
-    }
-  }
-
-  Future<void> _saveLesson() async {
-    if (!_canSaveLesson) return;
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.0;
+    });
 
     try {
-      setState(() {
-        _isUploading = true;
-        _uploadProgress = 0.0;
-        _uploadError = null;
-      });
-
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
-      final lessonId = await _lessonService.createLesson(
-        title: _lessonData.title,
-        subject: _lessonData.subject,
-        grade: _lessonData.grade,
-        durationSeconds: _lessonData.videoDuration?.inSeconds ?? 2700,
-        educatorId: user.id,
-        description: _lessonData.description,
-        isPublished: _lessonData.publishImmediately,
-        scheduledPublish: _lessonData.scheduledDate,
+      // Step 1: Quick validation (5%)
+      setState(() => _uploadProgress = 0.05);
+
+      // Step 2: Get duration and create lesson in parallel (25%)
+      final results = await Future.wait([
+        _lessonService.getVideoDuration(_selectedVideo!),
+        _lessonService.createLesson(
+          title: _titleController.text.trim(),
+          subject: _selectedSubject,
+          grade: _selectedGrade,
+          durationSeconds: 0, // Will be updated after duration is known
+          educatorId: user.id,
+          description: _descriptionController.text.trim().isEmpty
+              ? null
+              : _descriptionController.text.trim(),
+          isPublished: !_scheduleForLater,
+          scheduledPublish: _scheduleForLater ? _scheduledDate : null,
+        ),
+      ]);
+
+      final duration = results[0] as Duration;
+      final lessonId = results[1] as String;
+
+      // Update lesson with actual duration
+      await _lessonService.updateLessonMedia(
+        lessonId: lessonId,
+        videoUrl: '', // Will be updated after upload
       );
 
-      String? videoUrl;
-      String? thumbnailUrl;
+      setState(() => _uploadProgress = 0.30);
 
-      if (_lessonData.videoFile != null || _webVideoBytes != null) {
-        if (kIsWeb) {
-          if (_webVideoBytes != null) {
-            videoUrl = await _lessonService.uploadVideoWebFromList(
-              lessonId: lessonId,
-              educatorId: user.id,
-              fileBytes: _webVideoBytes!,
-              fileName: _webVideoFileName ?? 'video.mp4',
-              onProgress: (progress) {
-                if (mounted) {
-                  setState(() => _uploadProgress = progress * 0.7);
-                }
-              },
-            );
-          }
-        } else {
-          videoUrl = await _uploadVideoToServer(
-            lessonId: lessonId,
-            educatorId: user.id,
-            videoFile: _lessonData.videoFile!,
-            onProgress: (progress) {
-              if (mounted) {
-                setState(() => _uploadProgress = progress * 0.7);
-              }
-            },
-          );
-
-          if (!kIsWeb) {
-            final currentUser = Supabase.instance.client.auth.currentUser;
-            if (currentUser != null) {
-              thumbnailUrl = await _lessonService.generateThumbnail(
-                lessonId: lessonId,
-                educatorId: currentUser.id,
-                videoFile: _lessonData.videoFile!,
-              );
-            }
-          }
-        }
-
-        await _lessonService.updateLessonUrls(
+      // Step 3: Upload video and generate thumbnail in parallel (65%)
+      final uploadResults = await Future.wait([
+        _lessonService.uploadVideo(
           lessonId: lessonId,
-          videoUrl: videoUrl ?? '',
-          thumbnailUrl: thumbnailUrl ?? '',
-        );
+          educatorId: user.id,
+          videoFile: _selectedVideo!,
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _uploadProgress = 0.30 + (progress * 0.65);
+              });
+            }
+          },
+        ),
+        _lessonService.generateThumbnail(
+          lessonId: lessonId,
+          educatorId: user.id,
+          videoFile: _selectedVideo!,
+        ),
+      ], eagerError: true);
 
-        setState(() {
-          _lessonData = _lessonData.copyWith(videoUrl: videoUrl);
-        });
+      final videoUrl = uploadResults[0] as String;
+      final thumbnailUrl = uploadResults[1] as String?;
 
-        if (videoUrl != null) {
-          await _initializeVideoPlayer(videoUrl: videoUrl);
-        }
+      setState(() => _uploadProgress = 0.95);
+
+      // Step 4: Final update with URLs (5%)
+      await _lessonService.updateLessonMedia(
+        lessonId: lessonId,
+        videoUrl: videoUrl,
+        thumbnailUrl: thumbnailUrl,
+      );
+
+      setState(() => _uploadProgress = 1.0);
+
+      // Show success message
+      await _showSuccessDialog();
+
+      // Navigate back
+      if (mounted) {
+        Navigator.pop(context);
       }
-
-      _showSuccessAndNavigate();
     } catch (e) {
-      _handleUploadError(e);
+      if (mounted) {
+        _showErrorDialog('Lesson Creation Failed', e.toString());
+      }
     } finally {
       if (mounted) {
-        setState(() => _isUploading = false);
+        setState(() {
+          _isUploading = false;
+        });
       }
     }
   }
 
-  void _handleUploadError(dynamic error) {
-    String errorMessage = 'An unexpected error occurred';
-
-    if (error is SocketException) {
-      errorMessage = 'Network connection failed. Please check your internet.';
-    } else if (error is HttpException) {
-      errorMessage = 'Server error. Please try again later.';
-    } else if (error is FormatException) {
-      errorMessage = 'Invalid file format. Please try another video.';
-    } else {
-      errorMessage = error.toString();
-    }
-
-    setState(() {
-      _uploadError = errorMessage;
-      _isUploading = false;
-      _isExtractingDuration = false;
-    });
-
-    _showError(errorMessage);
-  }
-
-  // ========== VIDEO PLAYBACK METHODS ==========
-
-  void _playVideoFullScreen() {
-    if (_chewieController != null &&
-        _chewieController!.videoPlayerController.value.isInitialized) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => Scaffold(
-            appBar: AppBar(
-              title: const Text('Video Preview'),
-              backgroundColor: Colors.black,
-              foregroundColor: Colors.white,
-            ),
-            backgroundColor: Colors.black,
-            body: Center(
-              child: Chewie(controller: _chewieController!),
-            ),
-          ),
-        ),
-      );
-    } else if (kIsWeb && _webVideoBytes != null && _hasVideoError) {
-      _showInfo(
-          'Video preview is not available for this file. The video will play after saving.');
-    } else {
-      _showInfo('Please wait while the video loads...');
-    }
-  }
-
-  Widget _buildVideoPlayer() {
-    if (_isVideoLoading) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade900,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: _primaryColor),
-              const SizedBox(height: 16),
-              const Text(
-                'Loading video preview...',
-                style: TextStyle(color: Colors.white),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_hasVideoError) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade900,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.videocam_rounded, color: _primaryColor, size: 50),
-              const SizedBox(height: 16),
-              const Text(
-                'Video Selected',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                kIsWeb ? 'Ready to upload' : 'Tap Play Video to preview',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              if (kIsWeb) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Preview not available',
-                  style: TextStyle(color: _warningColor, fontSize: 10),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_chewieController != null &&
-        _chewieController!.videoPlayerController.value.isInitialized) {
-      return Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Chewie(controller: _chewieController!),
-        ),
-      );
-    }
-
-    if (_lessonData.videoFile != null ||
-        _lessonData.videoUrl != null ||
-        _webVideoBytes != null) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.grey.shade900,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.check_circle_rounded, color: _successColor, size: 50),
-              const SizedBox(height: 8),
-              const Text(
-                'Video Selected',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                kIsWeb ? 'Ready to upload' : 'Tap Play Video to preview',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              if (_webVideoFileName != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _webVideoFileName!,
-                  style: const TextStyle(color: Colors.white70, fontSize: 10),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade900,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+  Future<void> _showSuccessDialog() async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
           children: [
-            Icon(Icons.videocam_rounded, color: Colors.white, size: 50),
-            SizedBox(height: 8),
+            Icon(Icons.check_circle, color: _successColor, size: 28),
+            const SizedBox(width: 12),
             Text(
-              'No video selected',
-              style: TextStyle(color: Colors.white),
+              'Success!',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: _textColor,
+              ),
             ),
           ],
         ),
+        content: Text(
+          _scheduleForLater
+              ? 'Your lesson "${_titleController.text}" has been scheduled successfully!'
+              : 'Your lesson "${_titleController.text}" has been published successfully!',
+          style: TextStyle(
+            fontSize: 16,
+            color: _textColor,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              foregroundColor: _primaryColor,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              'OK',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ========== RECORDING METHODS ==========
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: _errorColor, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: _textColor,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: TextStyle(
+            fontSize: 16,
+            color: _textColor,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              foregroundColor: _primaryColor,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              'OK',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-  void _startRecordingTimer() {
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
+  void _showSuccessSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: _successColor,
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              message,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Future<void> _selectScheduleDate() async {
+    final DateTime now = DateTime.now();
+    final DateTime initialDate =
+        _scheduledDate ?? now.add(const Duration(minutes: 5));
+
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: now.add(const Duration(minutes: 5)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _textColor,
+            ),
+            dialogBackgroundColor: _cardColor,
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      final TimeOfDay initialTime = _scheduledDate != null
+          ? TimeOfDay(
+              hour: _scheduledDate!.hour, minute: _scheduledDate!.minute)
+          : TimeOfDay.fromDateTime(now.add(const Duration(minutes: 5)));
+
+      final TimeOfDay? time = await showTimePicker(
+        context: context,
+        initialTime: initialTime,
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: ColorScheme.light(
+                primary: _primaryColor,
+                onPrimary: Colors.white,
+                surface: _cardColor,
+                onSurface: _textColor,
+              ),
+              dialogBackgroundColor: _cardColor,
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (time != null) {
+        final DateTime scheduledDateTime = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          time.hour,
+          time.minute,
+        );
+
+        // Validate that scheduled time is at least 5 minutes from now
+        if (scheduledDateTime.isBefore(now.add(const Duration(minutes: 5)))) {
+          _showErrorDialog(
+            'Invalid Schedule Time',
+            'Please select a time at least 5 minutes from now.',
+          );
+          return;
+        }
+
         setState(() {
-          _recordingTime += const Duration(seconds: 1);
+          _scheduledDate = scheduledDateTime;
         });
       }
-    });
-  }
-
-  void _openCamera() {
-    if (kIsWeb) {
-      _showError(
-          'Camera recording is not supported on web. Please use the upload option.');
-      return;
     }
-    setState(() {
-      _isRecording = true;
-      _recordingTime = const Duration();
-    });
-    _startRecordingTimer();
   }
 
-  void _stopRecording() {
-    _recordingTimer?.cancel();
-    setState(() {
-      _isRecording = false;
-      _isPaused = false;
-    });
-  }
+  String _formatScheduleDate(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final scheduledDay = DateTime(date.year, date.month, date.day);
 
-  void _pauseRecording() {
-    _recordingTimer?.cancel();
-    setState(() {
-      _isPaused = true;
-    });
-  }
-
-  void _resumeRecording() {
-    setState(() {
-      _isPaused = false;
-    });
-    _startRecordingTimer();
-  }
-
-  // ========== UI BUILDING METHODS ==========
-
-  bool get _canSaveLesson {
-    return _titleController.text.isNotEmpty &&
-        _lessonData.subject.isNotEmpty &&
-        _lessonData.grade.isNotEmpty &&
-        (_lessonData.videoFile != null || _webVideoBytes != null) &&
-        !_isLoadingData;
-  }
-
-  double get _lessonProgress {
-    double progress = 0.0;
-    if (_titleController.text.isNotEmpty) progress += 0.3;
-    if (_lessonData.grade.isNotEmpty) progress += 0.3;
-    if (_lessonData.videoFile != null || _webVideoBytes != null) {
-      progress += 0.4;
+    String dayPrefix;
+    if (scheduledDay == today) {
+      dayPrefix = 'Today';
+    } else if (scheduledDay == tomorrow) {
+      dayPrefix = 'Tomorrow';
+    } else {
+      dayPrefix = '${date.day}/${date.month}/${date.year}';
     }
-    return progress;
+
+    final time =
+        '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    return '$dayPrefix at $time';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _getBackgroundColor(),
-      appBar: _buildAppBar(),
-      body: _buildBody(),
-      floatingActionButton: _buildFloatingActionButton(),
+      backgroundColor: _backgroundColor,
+      appBar: AppBar(
+        title: const Text(
+          'Create New Lesson',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: _primaryColor,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: _isUploading ? _buildUploadProgress() : _buildLessonForm(),
     );
   }
 
-  Widget _buildBody() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildProgressIndicator(),
-          const SizedBox(height: 32),
-          _buildSectionHeader(
-              'Lesson Information', Icons.info_outline_rounded, _infoColor),
-          const SizedBox(height: 20),
-          _buildLessonInfoForm(),
-          const SizedBox(height: 32),
-          _buildSectionHeader(
-              'Video Content', Icons.videocam_rounded, _primaryColor),
-          const SizedBox(height: 20),
-          _buildVideoOptions(),
-          const SizedBox(height: 32),
-          _buildSectionHeader(
-              'Target Audience', Icons.people_alt_rounded, _successColor),
-          const SizedBox(height: 20),
-          _buildGradeSelection(),
-          const SizedBox(height: 32),
-          _buildSectionHeader(
-              'Scheduling', Icons.schedule_rounded, _warningColor),
-          const SizedBox(height: 20),
-          _buildSchedulingOptions(),
-          const SizedBox(height: 40),
-        ],
+  Widget _buildUploadProgress() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 100,
+                  height: 100,
+                  child: CircularProgressIndicator(
+                    value: _uploadProgress,
+                    strokeWidth: 8,
+                    backgroundColor: _hintColor.withOpacity(0.2),
+                    valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
+                  ),
+                ),
+                Text(
+                  '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _primaryColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+            Text(
+              _scheduleForLater
+                  ? 'Scheduling Your Lesson...'
+                  : 'Publishing Your Lesson...',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: _textColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _uploadProgress < 0.3
+                  ? 'Preparing lesson...'
+                  : _uploadProgress < 0.7
+                      ? 'Uploading video...'
+                      : _uploadProgress < 0.9
+                          ? 'Generating thumbnail...'
+                          : 'Finalizing...',
+              style: TextStyle(
+                fontSize: 16,
+                color: _hintColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: _uploadProgress,
+              backgroundColor: _hintColor.withOpacity(0.2),
+              valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildLessonInfoForm() {
-    return Column(
-      children: [
-        _buildFormField(
-          label: 'Lesson Title',
-          hintText: 'Advanced Calculus: Derivatives & Applications',
-          controller: _titleController,
-          icon: Icons.title_rounded,
-          maxLines: 1,
+  Widget _buildLessonForm() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 100),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Video Selection Section
+              _buildVideoSelectionSection(),
+              const SizedBox(height: 24),
+
+              // Lesson Details Section
+              _buildLessonDetailsSection(),
+              const SizedBox(height: 24),
+
+              // Schedule Options
+              _buildScheduleSection(),
+              const SizedBox(height: 32),
+
+              // Create Button
+              _buildCreateButton(),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
-        const SizedBox(height: 20),
-        _buildFormField(
-          label: 'Description (Optional)',
-          hintText: 'Describe the lesson content and learning objectives...',
-          controller: _descriptionController,
-          icon: Icons.description_rounded,
-          maxLines: 3,
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(child: _buildSubjectDropdown()),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      'Duration',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _getTextColor(),
-                      ),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _getBorderColor()),
-                      color: _getCardColor(),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.timer_rounded,
-                            color: _getTextColor().withOpacity(0.5), size: 20),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _lessonData.durationText,
-                            style: TextStyle(
-                              color: _isExtractingDuration
-                                  ? _primaryColor
-                                  : _getTextColor().withOpacity(
-                                      _lessonData.videoFile != null ||
-                                              _webVideoBytes != null
-                                          ? 1.0
-                                          : 0.5),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        if (_isExtractingDuration)
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _primaryColor,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildVideoOptions() {
+  Widget _buildVideoSelectionSection() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.videocam_rounded,
+                    color: _primaryColor,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Lesson Video',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _textColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_selectedVideo != null)
+              _buildVideoPreview()
+            else
+              _buildVideoSelectionButtons(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoSelectionButtons() {
     return Column(
       children: [
-        if (_lessonData.videoFile != null ||
-            _lessonData.videoUrl != null ||
-            _webVideoBytes != null)
-          _buildVideoPreview(),
+        Container(
+          width: double.infinity,
+          height: 140,
+          decoration: BoxDecoration(
+            color: _backgroundColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _hintColor.withOpacity(0.3),
+              width: 2,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.video_library_rounded,
+                size: 48,
+                color: _hintColor,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Add your lesson video',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: _hintColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'MP4, MOV, AVI, MKV, or WEBM • Max 500MB',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _hintColor.withOpacity(0.7),
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
-              child: _buildVideoOptionCard(
-                'Upload Video',
-                Icons.upload_rounded,
-                _infoColor,
-                'Choose from gallery',
-                onTap: _uploadVideo,
+              child: ElevatedButton(
+                onPressed: _pickVideo,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _primaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.video_library_rounded, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Choose Video',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
-              child: _buildVideoOptionCard(
-                'Record Video',
-                Icons.videocam_rounded,
-                _errorColor,
-                'Use camera',
-                onTap: _openCamera,
+              child: OutlinedButton(
+                onPressed: _recordVideo,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _primaryColor,
+                  side: BorderSide(color: _primaryColor, width: 2),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.videocam_rounded, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Record',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
         ),
-        if (_isRecording) ...[
-          const SizedBox(height: 20),
-          _buildRecordingInterface(),
-        ],
       ],
     );
   }
 
   Widget _buildVideoPreview() {
-    String fileName = 'Video Selected';
-    if (_webVideoFileName != null) {
-      fileName = _webVideoFileName!;
-    } else if (_temporaryVideoPath != null) {
-      fileName = path.basename(_temporaryVideoPath!);
-    } else if (_lessonData.videoFile != null) {
-      fileName = path.basename(_lessonData.videoFile!.path);
-    }
-
     return Column(
       children: [
         Container(
           width: double.infinity,
-          height: 250,
-          margin: const EdgeInsets.only(bottom: 16),
+          height: 220,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _getBorderColor().withOpacity(0.5)),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: _isUploading ? _buildUploadProgress() : _buildVideoPlayer(),
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: _getCardColor(),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _getBorderColor()),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.videocam_rounded, color: _primaryColor),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      fileName,
-                      style: TextStyle(
-                        color: _getTextColor(),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: _successColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_lessonData.videoDuration != null)
-                Row(
-                  children: [
-                    Icon(Icons.timer_rounded,
-                        color: _getTextColor().withOpacity(0.6), size: 16),
-                    const SizedBox(width: 4),
-                    Text(
-                      _formatDurationForDisplay(_lessonData.videoDuration!),
-                      style: TextStyle(
-                        color: _getTextColor().withOpacity(0.8),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _playVideoFullScreen,
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Play Video'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _primaryColor,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: _uploadVideo,
-                    icon: const Icon(Icons.replay_rounded),
-                    tooltip: 'Replace Video',
-                  ),
-                ],
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 15,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_videoController != null &&
+                  _videoController!.value.isInitialized)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: VideoPlayer(_videoController!),
+                )
+              else if (_isVideoInitializing)
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: _primaryColor),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Loading video preview...',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.videocam_rounded,
+                            size: 48, color: Colors.white),
+                        const SizedBox(height: 12),
+                        Text(
+                          _selectedVideo!.path.split('/').last,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_videoDuration != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Duration: $_videoDuration',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Play/Pause overlay
+              if (_videoController != null &&
+                  _videoController!.value.isInitialized)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (_videoController!.value.isPlaying) {
+                          _videoController!.pause();
+                        } else {
+                          _videoController!.play();
+                        }
+                      });
+                    },
+                    child: Container(
+                      color: Colors.black.withOpacity(0.3),
+                      child: Center(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.black
+                                .withOpacity(_isVideoPlaying ? 0.0 : 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _isVideoPlaying ? Icons.pause : Icons.play_arrow,
+                            size: _isVideoPlaying ? 32 : 40,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Video info overlay
+              if (_videoDuration != null)
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _videoDuration!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
-        if (_uploadError != null)
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _errorColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _errorColor.withOpacity(0.3)),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _replaceVideo,
+                icon: Icon(Icons.swap_horiz_rounded,
+                    color: _primaryColor, size: 20),
+                label: Text(
+                  'Replace Video',
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  side: BorderSide(color: _primaryColor, width: 2),
+                ),
+              ),
             ),
-            child: Row(
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _editVideo,
+                icon: const Icon(Icons.edit_rounded, size: 20),
+                label: const Text(
+                  'Edit Video',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _secondaryColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLessonDetailsSection() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Icon(Icons.error_outline_rounded, color: _errorColor, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _uploadError!,
-                    style: TextStyle(color: _errorColor, fontSize: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _accentColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.info_rounded,
+                    color: _accentColor,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Lesson Details',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _textColor,
                   ),
                 ),
               ],
             ),
-          ),
-      ],
-    );
-  }
+            const SizedBox(height: 20),
 
-  Widget _buildUploadProgress() {
-    return Container(
-      color: Colors.grey.shade100,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircularProgressIndicator(
-            value: _uploadProgress > 0 ? _uploadProgress : null,
-            color: _primaryColor,
-            strokeWidth: 4,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            '${(_uploadProgress * 100).round()}%',
-            style: TextStyle(
-              color: _primaryColor,
-              fontWeight: FontWeight.w700,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Uploading video...',
-            style: TextStyle(color: Colors.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGradeSelection() {
-    if (_isLoadingData) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _getCardColor(),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            CircularProgressIndicator(color: _primaryColor),
-            const SizedBox(width: 12),
+            // Title
             Text(
-              'Loading your grade...',
-              style: TextStyle(color: _getTextColor()),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Your Teaching Grade',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: _getTextColor(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: _successColor.withAlpha(20),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _successColor.withOpacity(0.3)),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.school_rounded, color: _successColor),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _educatorGrade,
-                      style: TextStyle(
-                        color: _getTextColor(),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Text(
-                      'Automatically assigned from your profile',
-                      style: TextStyle(
-                        color: _getTextColor().withOpacity(0.6),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.check_circle_rounded, color: _successColor),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSubjectDropdown() {
-    if (_isLoadingData) {
-      return _buildFormField(
-        label: 'Subject',
-        hintText: 'Loading your subjects...',
-        controller: TextEditingController(),
-        icon: Icons.category_rounded,
-        maxLines: 1,
-        enabled: false,
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Text(
-            'Subject',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: _getTextColor(),
-            ),
-          ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _getBorderColor()),
-          ),
-          child: DropdownButtonFormField<String>(
-            value: _lessonData.subject.isNotEmpty ? _lessonData.subject : null,
-            items: _availableSubjects.map((String subject) {
-              return DropdownMenuItem<String>(
-                value: subject,
-                child: Text(subject),
-              );
-            }).toList(),
-            onChanged: (String? newValue) {
-              if (newValue != null) {
-                setState(() {
-                  _lessonData = _lessonData.copyWith(subject: newValue);
-                });
-              }
-            },
-            decoration: InputDecoration(
-              hintText: 'Select your subject',
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              prefixIcon: Icon(Icons.category_rounded,
-                  color: _getTextColor().withOpacity(0.5)),
-            ),
-            style: TextStyle(
-              color: _getTextColor(),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSchedulingOptions() {
-    return Column(
-      children: [
-        _buildScheduleOption(
-          'Publish Immediately',
-          'Lesson will be available to students right away',
-          Icons.publish_rounded,
-          _lessonData.publishImmediately,
-          () => _scheduleLesson(immediate: true),
-        ),
-        const SizedBox(height: 16),
-        _buildScheduleOption(
-          'Schedule for Later',
-          'Set a specific date and time for publication',
-          Icons.schedule_rounded,
-          !_lessonData.publishImmediately,
-          () => _scheduleLesson(immediate: false),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildScheduleOption(String title, String subtitle, IconData icon,
-      bool isSelected, VoidCallback onTap) {
-    return Material(
-      color: isSelected ? _primaryColor.withAlpha(20) : _getCardColor(),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isSelected ? _primaryColor : _getBorderColor(),
-              width: isSelected ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: isSelected ? _primaryColor : _getCardColor(),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  icon,
-                  color: isSelected
-                      ? Colors.white
-                      : _getTextColor().withOpacity(0.6),
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: _getTextColor(),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _getTextColor().withOpacity(0.6),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isSelected ? _primaryColor : _getBorderColor(),
-                    width: 2,
-                  ),
-                ),
-                child: isSelected
-                    ? Icon(
-                        Icons.check_rounded,
-                        color: _primaryColor,
-                        size: 16,
-                      )
-                    : null,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecordingInterface() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Text(
-            _isPaused ? 'RECORDING PAUSED' : '● RECORDING LIVE',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: _isPaused ? _warningColor : _errorColor,
-              letterSpacing: 1.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _formatDuration(_recordingTime),
-            style: const TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              fontFamily: 'RobotoMono',
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildControlButton(
-                Icons.stop_rounded,
-                'Stop',
-                _errorColor,
-                onTap: _stopRecording,
-                size: 60,
-              ),
-              const SizedBox(width: 20),
-              _buildControlButton(
-                _isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                _isPaused ? 'Resume' : 'Pause',
-                _warningColor,
-                onTap: _isPaused ? _resumeRecording : _pauseRecording,
-                size: 60,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControlButton(IconData icon, String label, Color color,
-      {required VoidCallback onTap, double size = 50}) {
-    return Column(
-      children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: Icon(icon, color: Colors.white, size: size * 0.4),
-            onPressed: onTap,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFloatingActionButton() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      child: FloatingActionButton.extended(
-        onPressed: _canSaveLesson && !_isUploading ? _saveLesson : null,
-        backgroundColor:
-            _canSaveLesson && !_isUploading ? _primaryColor : Colors.grey,
-        foregroundColor: Colors.white,
-        icon: _isUploading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.save_rounded),
-        label: Text(_isUploading ? 'Saving...' : 'Save Lesson'),
-      ),
-    );
-  }
-
-  AppBar _buildAppBar() {
-    return AppBar(
-      leading: IconButton(
-        icon: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: _getCardColor(),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _getBorderColor()),
-          ),
-          child: Icon(Icons.arrow_back_ios_new_rounded,
-              color: _getTextColor(), size: 18),
-        ),
-        onPressed: () => Navigator.pop(context),
-      ),
-      title: Text(
-        'Create New Lesson',
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: _getTextColor(),
-          letterSpacing: -0.3,
-        ),
-      ),
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      centerTitle: false,
-      actions: [
-        Container(
-          margin: const EdgeInsets.only(right: 16),
-          child: IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _primaryColor.withAlpha(25),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.help_outline_rounded,
-                  color: _primaryColor, size: 20),
-            ),
-            onPressed: _showHelp,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProgressIndicator() {
-    return Column(
-      children: [
-        SizedBox(
-          height: 6,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: _lessonProgress,
-              backgroundColor: _getBorderColor(),
-              color: _primaryColor,
-              minHeight: 6,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Lesson Creation Progress',
+              'Lesson Title *',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: _getTextColor().withOpacity(0.7),
+                color: _textColor,
               ),
             ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                hintText: 'Enter a descriptive title for your lesson',
+                hintStyle: TextStyle(color: _hintColor),
+                filled: true,
+                fillColor: _backgroundColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: _primaryColor, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+              ),
+              style: TextStyle(
+                fontSize: 16,
+                color: _textColor,
+                fontWeight: FontWeight.w500,
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Please enter a lesson title';
+                }
+                if (value.trim().length < 5) {
+                  return 'Title must be at least 5 characters long';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Description
             Text(
-              '${(_lessonProgress * 100).round()}% Complete',
+              'Description',
               style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: _primaryColor,
+                fontWeight: FontWeight.w600,
+                color: _textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _descriptionController,
+              decoration: InputDecoration(
+                hintText: 'Add a description for your lesson (optional)',
+                hintStyle: TextStyle(color: _hintColor),
+                filled: true,
+                fillColor: _backgroundColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: _primaryColor, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+              ),
+              style: TextStyle(
+                fontSize: 16,
+                color: _textColor,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 4,
+              textAlignVertical: TextAlignVertical.top,
+            ),
+            const SizedBox(height: 16),
+
+            // Subject and Grade Display
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Subject Dropdown - Full width
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Subject *',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: _backgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedSubject,
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: _backgroundColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                BorderSide(color: _primaryColor, width: 2),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        items: _availableSubjects.map((String subject) {
+                          return DropdownMenuItem<String>(
+                            value: subject,
+                            child: Text(
+                              subject,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: _textColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedSubject = newValue!;
+                          });
+                        },
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: _textColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        dropdownColor: _cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Grade Display (Non-editable) - Full width
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Grade',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _backgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _hintColor.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.school_rounded,
+                            color: _primaryColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            _selectedGrade,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: _textColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            Icons.lock_outline,
+                            color: _hintColor,
+                            size: 16,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Grade is automatically assigned based on your educator profile',
+              style: TextStyle(
+                fontSize: 12,
+                color: _hintColor,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ],
         ),
-        if (!_canSaveLesson && _lessonProgress >= 0.6) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Complete all required fields to save',
-            style: TextStyle(
-              color: _errorColor,
-              fontSize: 12,
-            ),
+      ),
+    );
+  }
+
+  Widget _buildScheduleSection() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
           ),
         ],
-      ],
-    );
-  }
-
-  Widget _buildSectionHeader(String title, IconData icon, Color color) {
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withAlpha(25),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.3)),
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: _getTextColor(),
-            letterSpacing: -0.3,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFormField({
-    required String label,
-    required String hintText,
-    required TextEditingController controller,
-    required IconData icon,
-    int maxLines = 1,
-    bool enabled = true,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: _getTextColor(),
-            ),
-          ),
-        ),
-        TextFormField(
-          controller: controller,
-          maxLines: maxLines,
-          enabled: enabled,
-          decoration: InputDecoration(
-            hintText: hintText,
-            hintStyle: TextStyle(
-              color: _getTextColor().withOpacity(0.4),
-              fontSize: 14,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: _getBorderColor()),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: _getBorderColor()),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: _primaryColor, width: 2),
-            ),
-            filled: true,
-            fillColor:
-                enabled ? _getCardColor() : _getCardColor().withOpacity(0.5),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            prefixIcon:
-                Icon(icon, color: _getTextColor().withOpacity(0.5), size: 20),
-          ),
-          style: TextStyle(
-            color: _getTextColor(),
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVideoOptionCard(
-      String title, IconData icon, Color color, String subtitle,
-      {VoidCallback? onTap}) {
-    return Material(
-      color: _getCardColor(),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _getBorderColor().withOpacity(0.5)),
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: color.withAlpha(25),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _warningColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.schedule_rounded,
+                    color: _warningColor,
+                    size: 24,
+                  ),
                 ),
-                child: Icon(icon, color: color, size: 32),
+                const SizedBox(width: 12),
+                Text(
+                  'Publishing Options',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: _textColor,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Publish Now Option
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _scheduleForLater = false;
+                  _scheduledDate = null;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _backgroundColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: !_scheduleForLater
+                        ? _primaryColor
+                        : _hintColor.withOpacity(0.3),
+                    width: !_scheduleForLater ? 2 : 1,
+                  ),
+                  boxShadow: !_scheduleForLater
+                      ? [
+                          BoxShadow(
+                            color: _primaryColor.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color:
+                              !_scheduleForLater ? _primaryColor : _hintColor,
+                          width: 2,
+                        ),
+                        color: !_scheduleForLater
+                            ? _primaryColor
+                            : Colors.transparent,
+                      ),
+                      child: !_scheduleForLater
+                          ? Icon(Icons.check, size: 16, color: Colors.white)
+                          : null,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Publish Now',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: _textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Make lesson available immediately',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _hintColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.rocket_launch_rounded,
+                      color: !_scheduleForLater ? _primaryColor : _hintColor,
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
+            ),
+            const SizedBox(height: 16),
+
+            // Schedule for Later Option
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _scheduleForLater = true;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _backgroundColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _scheduleForLater
+                        ? _primaryColor
+                        : _hintColor.withOpacity(0.3),
+                    width: _scheduleForLater ? 2 : 1,
+                  ),
+                  boxShadow: _scheduleForLater
+                      ? [
+                          BoxShadow(
+                            color: _primaryColor.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _scheduleForLater ? _primaryColor : _hintColor,
+                          width: 2,
+                        ),
+                        color: _scheduleForLater
+                            ? _primaryColor
+                            : Colors.transparent,
+                      ),
+                      child: _scheduleForLater
+                          ? Icon(Icons.check, size: 16, color: Colors.white)
+                          : null,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Schedule for Later',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: _textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Publish at a specific date and time',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _hintColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.calendar_today_rounded,
+                      color: _scheduleForLater ? _primaryColor : _hintColor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Date Picker
+            if (_scheduleForLater) ...[
+              const SizedBox(height: 20),
               Text(
-                title,
+                'Schedule Time',
                 style: TextStyle(
                   fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: _getTextColor(),
+                  fontWeight: FontWeight.w600,
+                  color: _textColor,
                 ),
-                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _getTextColor().withOpacity(0.6),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: _selectScheduleDate,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: _backgroundColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _primaryColor.withOpacity(0.3),
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _primaryColor.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.calendar_month_rounded,
+                          color: _primaryColor,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Schedule Date & Time',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: _textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _scheduledDate == null
+                                  ? 'Tap to select date and time'
+                                  : _formatScheduleDate(_scheduledDate!),
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: _scheduledDate == null
+                                    ? _hintColor
+                                    : _primaryColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        color: _hintColor,
+                        size: 18,
+                      ),
+                    ],
+                  ),
                 ),
-                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _warningColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        color: _warningColor, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Schedule time must be at least 5 minutes from now',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _warningColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCreateButton() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: _createLesson,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _scheduleForLater ? _warningColor : _primaryColor,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            elevation: 4,
+            shadowColor: _scheduleForLater
+                ? _warningColor.withOpacity(0.3)
+                : _primaryColor.withOpacity(0.3),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                _scheduleForLater
+                    ? Icons.schedule_rounded
+                    : Icons.rocket_launch_rounded,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _scheduleForLater ? 'Schedule Lesson' : 'Publish Lesson Now',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Color _getBackgroundColor() => Colors.white;
-  Color _getCardColor() => Colors.grey.shade100;
-  Color _getBorderColor() => Colors.grey.shade300;
-  Color _getTextColor() => Colors.black;
-
-  void _showHelp() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Help'),
-        content: const Text('Need help creating your lesson? Contact support.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _scheduleLesson({required bool immediate}) {
-    setState(() {
-      _lessonData = _lessonData.copyWith(
-        publishImmediately: immediate,
-        scheduledDate:
-            immediate ? null : DateTime.now().add(const Duration(days: 1)),
-      );
-    });
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
-    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
-    return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
-  }
-
-  void _showFileSelected(PlatformFile file) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Selected: ${file.name}'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _showSuccessAndNavigate() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Lesson saved successfully!'),
-        backgroundColor: _successColor,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    Navigator.pop(context);
-  }
-
-  void _showError(String error) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error: $error'),
-        backgroundColor: _errorColor,
-        duration: const Duration(seconds: 5),
-      ),
-    );
-  }
-
-  void _showInfo(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: _infoColor,
-        duration: const Duration(seconds: 3),
       ),
     );
   }

@@ -1,18 +1,143 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:math';
-// ignore: unnecessary_import
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
 
 class LessonCreationService {
-  final SupabaseClient _client;
+  final SupabaseClient _client = Supabase.instance.client;
+  final ImagePicker _imagePicker = ImagePicker();
 
-  LessonCreationService() : _client = Supabase.instance.client;
+  // Camera state management
+  bool _isCameraInUse = false;
+  DateTime? _lastCameraAccessTime;
+
+  // Pick video from gallery
+  Future<File?> pickVideo() async {
+    try {
+      await _cleanupCameraResources();
+
+      final XFile? pickedFile = await _imagePicker.pickVideo(
+        source: ImageSource.gallery,
+      );
+
+      return pickedFile != null ? File(pickedFile.path) : null;
+    } catch (e) {
+      await _cleanupCameraResources();
+      throw Exception('Failed to pick video');
+    }
+  }
+
+  // Record video using camera
+  Future<File?> recordVideo() async {
+    if (_isCameraInUse) {
+      throw Exception('Camera is currently in use');
+    }
+
+    _isCameraInUse = true;
+
+    try {
+      final XFile? recordedFile = await _imagePicker.pickVideo(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.rear,
+      );
+
+      if (recordedFile != null) {
+        return File(recordedFile.path);
+      }
+      return null;
+    } catch (e) {
+      throw Exception(
+          'Camera unavailable. Close other camera apps and try again.');
+    } finally {
+      _isCameraInUse = false;
+    }
+  }
+
+  Future<void> _cleanupCameraResources() async {
+    _isCameraInUse = false;
+    await Future.delayed(const Duration(milliseconds: 300));
+  }
+
+  // Validate video file
+  void validateVideoFile(File videoFile) {
+    final fileSize = videoFile.lengthSync();
+    const maxSize = 500 * 1024 * 1024;
+    if (fileSize > maxSize) {
+      throw Exception('Video file too large. Maximum size is 500MB');
+    }
+
+    final extension = path.extension(videoFile.path).toLowerCase();
+    final allowedExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+    if (!allowedExtensions.contains(extension)) {
+      throw Exception('Unsupported video format');
+    }
+  }
+
+  // Get video duration
+  Future<Duration> getVideoDuration(File videoFile) async {
+    final controller = VideoPlayerController.file(videoFile);
+    try {
+      await controller.initialize();
+      return controller.value.duration;
+    } finally {
+      await controller.dispose();
+    }
+  }
+
+  // Upload video to Supabase
+  Future<String> uploadVideo({
+    required String lessonId,
+    required String educatorId,
+    required File videoFile,
+    required Function(double) onProgress,
+  }) async {
+    try {
+      final fileName =
+          'video_${DateTime.now().millisecondsSinceEpoch}${path.extension(videoFile.path)}';
+      final filePath = '$educatorId/$lessonId/$fileName';
+
+      await _client.storage.from('videos').upload(filePath, videoFile);
+      return _client.storage.from('videos').getPublicUrl(filePath);
+    } catch (e) {
+      throw Exception('Failed to upload video');
+    }
+  }
+
+  // Generate thumbnail
+  Future<String?> generateThumbnail({
+    required String lessonId,
+    required String educatorId,
+    required File videoFile,
+  }) async {
+    try {
+      final uint8list = await VideoThumbnail.thumbnailData(
+        video: videoFile.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 320,
+        quality: 50,
+        timeMs: 1000,
+      );
+
+      if (uint8list == null) return null;
+
+      final tempFile =
+          File('${Directory.systemTemp.path}/${lessonId}_thumb.jpg');
+      await tempFile.writeAsBytes(uint8list);
+
+      final fileName = 'thumbnail_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filePath = '$educatorId/$lessonId/$fileName';
+
+      await _client.storage.from('thumbnails').upload(filePath, tempFile);
+      await tempFile.delete();
+
+      return _client.storage.from('thumbnails').getPublicUrl(filePath);
+    } catch (e) {
+      return null;
+    }
+  }
 
   // Create lesson in database
   Future<String> createLesson({
@@ -22,291 +147,53 @@ class LessonCreationService {
     required int durationSeconds,
     required String educatorId,
     String? description,
-    String? videoUrl,
-    String? thumbnailUrl,
     bool isPublished = false,
     DateTime? scheduledPublish,
   }) async {
     try {
-      final response = await _client
-          .from('lessons')
-          .insert({
-            'title': title.trim(),
-            'subject': subject.trim(),
-            'grade': grade,
-            'duration':
-                durationSeconds, // Use 'duration' instead of 'duration_seconds'
-            'educator_id': educatorId,
-            'description': description?.trim().isEmpty ?? true
-                ? null
-                : description?.trim(),
-            'video_url': videoUrl,
-            'thumbnail_url': thumbnailUrl,
-            'is_published': isPublished,
-            'scheduled_publish': scheduledPublish?.toIso8601String(),
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .select('id')
-          .single();
+      final response = await _client.from('lessons').insert({
+        'title': title,
+        'subject': subject,
+        'grade': grade,
+        'duration': durationSeconds,
+        'educator_id': educatorId,
+        'description': description,
+        'is_published': isPublished,
+        'scheduled_publish': scheduledPublish?.toIso8601String(),
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).select('id');
 
-      return response['id'] as String;
+      if (response.isEmpty) throw Exception('No ID returned');
+      return response.first['id'] as String;
     } catch (e) {
-      if (kDebugMode) {
-        print('Error creating lesson: $e');
-      }
-      throw Exception('Failed to create lesson: ${e.toString()}');
+      throw Exception('Failed to create lesson');
     }
   }
 
-  // Fetch educator's subjects from database
-  Future<List<String>> getEducatorSubjects(String educatorId) async {
-    try {
-      // Try to get subjects from profiles table first
-      final profileResponse = await _client
-          .from('profiles')
-          .select('subject_specialization')
-          .eq('id', educatorId)
-          .eq('role', 'educator')
-          .single();
-
-      final subjectSpecialization =
-          profileResponse['subject_specialization'] as String?;
-
-      if (subjectSpecialization != null && subjectSpecialization.isNotEmpty) {
-        return [subjectSpecialization];
-      }
-
-      // Fallback to default subjects
-      return ['Mathematics', 'English', 'Science', 'History'];
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error fetching educator subjects: $e');
-      }
-      return ['Mathematics', 'English', 'Science', 'History'];
-    }
-  }
-
-  // Fetch educator's grade from database - CORRECTED VERSION
-  Future<String> getEducatorGrade(String educatorId) async {
-    try {
-      debugPrint('🔍 Fetching grade for educator: $educatorId');
-
-      // Query the profiles table where educators actually exist
-      final response = await _client
-          .from('profiles')
-          .select('grade, first_name, last_name')
-          .eq('id', educatorId)
-          .eq('role', 'educator')
-          .single();
-
-      final grade = response['grade'] as String?;
-      final firstName = response['first_name'] as String?;
-      final lastName = response['last_name'] as String?;
-
-      debugPrint('📊 Found educator: $firstName $lastName - Grade: $grade');
-
-      if (grade == null || grade.isEmpty) {
-        debugPrint('⚠️ No grade found for educator, using fallback');
-        // Don't use hardcoded fallback - throw error instead
-        throw Exception('No grade assigned to educator $firstName $lastName');
-      }
-
-      return grade;
-    } catch (e) {
-      debugPrint('❌ Error fetching educator grade: $e');
-      // Don't return hardcoded grade - rethrow the error
-      throw Exception('Failed to fetch educator grade: ${e.toString()}');
-    }
-  }
-
-  // Extract video duration using video_player for accurate detection
-  Future<Duration> getVideoDuration(File videoFile) async {
-    if (kIsWeb) {
-      return const Duration(minutes: 45);
-    }
-
-    VideoPlayerController? controller;
-
-    try {
-      controller = VideoPlayerController.file(videoFile);
-      await controller.initialize();
-
-      final duration = controller.value.duration;
-      await controller.dispose();
-
-      if (duration == Duration.zero) {
-        throw Exception('Could not determine video duration');
-      }
-
-      return duration;
-    } catch (e) {
-      await controller?.dispose();
-      return await _extractDurationWithFFmpeg(videoFile);
-    }
-  }
-
-  Future<Duration> _extractDurationWithFFmpeg(File videoFile) async {
-    try {
-      final fileSize = await videoFile.length();
-      final estimatedMinutes = (fileSize / (1024 * 1024)).ceil();
-      return Duration(minutes: estimatedMinutes.clamp(1, 180));
-    } catch (e) {
-      return const Duration(minutes: 45);
-    }
-  }
-
-  Future<String> _getTemporaryPath() async {
-    if (kIsWeb) {
-      return '/tmp/thumbnail.jpg';
-    }
-    final tempDir = Directory.systemTemp;
-    return '${tempDir.path}/thumbnail.jpg';
-  }
-
-  // Upload video to storage
-  Future<String> uploadVideo({
+  // ADD THIS MISSING METHOD - Update lesson with media URLs
+  Future<void> updateLessonMedia({
     required String lessonId,
-    required String educatorId,
-    required File videoFile,
-    required Function(double) onProgress,
+    required String videoUrl,
+    String? thumbnailUrl,
   }) async {
     try {
-      final videoFileName =
-          'video_${DateTime.now().millisecondsSinceEpoch}${kIsWeb ? '.mp4' : path.extension(videoFile.path)}';
-      final storagePath = '$educatorId/$lessonId/$videoFileName';
+      final updateData = {
+        'video_url': videoUrl,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
 
-      onProgress(0.2);
-
-      await _client.storage.from('videos').upload(storagePath, videoFile);
-
-      onProgress(0.8);
-
-      final String videoUrl =
-          _client.storage.from('videos').getPublicUrl(storagePath);
-
-      onProgress(1.0);
-
-      return videoUrl;
-    } catch (e) {
-      throw Exception('Failed to upload video: ${e.toString()}');
-    }
-  }
-
-  // Upload video for web platform
-  Future<String> uploadVideoWeb({
-    required String lessonId,
-    required String educatorId,
-    required Uint8List fileBytes,
-    required String fileName,
-    required Function(double) onProgress,
-  }) async {
-    try {
-      final videoFileName =
-          'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      final storagePath = '$educatorId/$lessonId/$videoFileName';
-
-      onProgress(0.2);
-
-      await _client.storage.from('videos').uploadBinary(
-            storagePath,
-            fileBytes,
-            fileOptions: const FileOptions(contentType: 'video/mp4'),
-          );
-
-      onProgress(0.8);
-
-      final String videoUrl =
-          _client.storage.from('videos').getPublicUrl(storagePath);
-
-      onProgress(1.0);
-
-      return videoUrl;
-    } catch (e) {
-      throw Exception('Failed to upload video: ${e.toString()}');
-    }
-  }
-
-  // Helper method for web upload
-  Future<String> uploadVideoWebFromList({
-    required String lessonId,
-    required String educatorId,
-    required List<int> fileBytes,
-    required String fileName,
-    required Function(double) onProgress,
-  }) async {
-    try {
-      return await uploadVideoWeb(
-        lessonId: lessonId,
-        educatorId: educatorId,
-        fileBytes: Uint8List.fromList(fileBytes),
-        fileName: fileName,
-        onProgress: onProgress,
-      );
-    } catch (e) {
-      throw Exception('Failed to upload video from list: ${e.toString()}');
-    }
-  }
-
-  // Generate thumbnail from video
-  Future<String> generateThumbnail({
-    required String lessonId,
-    required String educatorId,
-    required File videoFile,
-  }) async {
-    if (kIsWeb) {
-      return '';
-    }
-
-    try {
-      final uint8list = await VideoThumbnail.thumbnailData(
-        video: videoFile.path,
-        imageFormat: ImageFormat.JPEG,
-        quality: 75,
-        maxHeight: 300,
-        timeMs: 10000,
-      );
-
-      if (uint8list == null || uint8list.isEmpty) {
-        throw Exception('Thumbnail generation returned null or empty data');
+      if (thumbnailUrl != null) {
+        updateData['thumbnail_url'] = thumbnailUrl;
       }
 
-      final tempFile = File(
-          '${(await _getTemporaryPath())}_thumb_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await tempFile.writeAsBytes(uint8list);
-
-      return await uploadThumbnail(
-        lessonId: lessonId,
-        educatorId: educatorId,
-        thumbnailFile: tempFile,
-      );
+      await _client.from('lessons').update(updateData).eq('id', lessonId);
     } catch (e) {
-      return '';
+      throw Exception('Failed to update lesson media');
     }
   }
 
-  Future<String> uploadThumbnail({
-    required String lessonId,
-    required String educatorId,
-    required File thumbnailFile,
-  }) async {
-    try {
-      final thumbnailFileName =
-          'thumbnail_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final storagePath = '$educatorId/$lessonId/$thumbnailFileName';
-
-      await _client.storage.from('thumbnails').upload(
-            storagePath,
-            thumbnailFile,
-          );
-
-      return _client.storage.from('thumbnails').getPublicUrl(storagePath);
-    } catch (e) {
-      throw Exception('Failed to upload thumbnail: ${e.toString()}');
-    }
-  }
-
-  // Update lesson with file URLs
+  // Update lesson with video URLs (for backward compatibility)
   Future<void> updateLessonUrls({
     required String lessonId,
     required String videoUrl,
@@ -319,55 +206,132 @@ class LessonCreationService {
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', lessonId);
     } catch (e) {
-      throw Exception('Failed to update lesson URLs: ${e.toString()}');
+      throw Exception('Failed to update lesson URLs');
     }
   }
 
-  // Validate video file
-  void validateVideoFile(PlatformFile file) {
-    if (!kIsWeb) {
-      if (file.size > 500 * 1024 * 1024) {
-        throw Exception('Video file too large. Maximum size is 500MB.');
-      }
+  // Schedule lesson for later publication
+  Future<void> scheduleLesson({
+    required String lessonId,
+    required DateTime publishDate,
+  }) async {
+    try {
+      await _client.from('lessons').update({
+        'scheduled_publish': publishDate.toIso8601String(),
+        'is_published': false,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', lessonId);
+    } catch (e) {
+      throw Exception('Failed to schedule lesson');
     }
   }
 
-  String formatFileSize(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = (log(bytes) / log(1024)).floor();
-    return '${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}';
+  // ULTRA-FAST Lesson Creation Method
+  Future<void> createLessonUltraFast({
+    required String title,
+    required String subject,
+    required String grade,
+    required File videoFile,
+    required String educatorId,
+    String? description,
+    bool isPublished = false,
+    DateTime? scheduledPublish,
+    required Function(double) onProgress,
+  }) async {
+    try {
+      // Step 1: Quick validation (5%)
+      validateVideoFile(videoFile);
+      onProgress(0.05);
+
+      // Step 2: Get duration (10%)
+      final duration = await getVideoDuration(videoFile);
+      onProgress(0.15);
+
+      // Step 3: Create lesson record (15%)
+      final lessonId = await createLesson(
+        title: title,
+        subject: subject,
+        grade: grade,
+        durationSeconds: duration.inSeconds,
+        educatorId: educatorId,
+        description: description,
+        isPublished: isPublished,
+        scheduledPublish: scheduledPublish,
+      );
+      onProgress(0.30);
+
+      // Step 4: Upload video and generate thumbnail in parallel (60%)
+      final results = await Future.wait([
+        uploadVideo(
+          lessonId: lessonId,
+          educatorId: educatorId,
+          videoFile: videoFile,
+          onProgress: (progress) {
+            onProgress(0.30 + (progress * 0.60));
+          },
+        ),
+        generateThumbnail(
+          lessonId: lessonId,
+          educatorId: educatorId,
+          videoFile: videoFile,
+        ),
+      ], eagerError: true);
+
+      final videoUrl = results[0] as String;
+      final thumbnailUrl = results[1] as String?;
+
+      // Step 5: Quick final update (10%)
+      await updateLessonMedia(
+        lessonId: lessonId,
+        videoUrl: videoUrl,
+        thumbnailUrl: thumbnailUrl,
+      );
+
+      onProgress(1.0);
+    } catch (e) {
+      await _cleanupCameraResources();
+      rethrow;
+    }
   }
 
-  List<String> getGradeOptions() {
+  // Get educator's grade
+  Future<String> getEducatorGrade(String educatorId) async {
+    try {
+      final response = await _client
+          .from('educators')
+          .select('grade_level')
+          .eq('user_id', educatorId)
+          .single();
+      return response['grade_level'] as String? ?? 'Grade 10';
+    } catch (e) {
+      return 'Grade 10';
+    }
+  }
+
+  // Get educator's subjects
+  Future<List<String>> getEducatorSubjects(String educatorId) async {
+    try {
+      final response = await _client
+          .from('educators')
+          .select('subjects_taught')
+          .eq('user_id', educatorId)
+          .single();
+
+      final subjects = response['subjects_taught'] as List<dynamic>?;
+      return subjects?.cast<String>() ?? getAvailableSubjects();
+    } catch (e) {
+      return getAvailableSubjects();
+    }
+  }
+
+  List<String> getAvailableSubjects() {
     return [
-      'Grade 1',
-      'Grade 2',
-      'Grade 3',
-      'Grade 4',
-      'Grade 5',
-      'Grade 6',
-      'Grade 7',
-      'Grade 8',
-      'Grade 9',
-      'Grade 10',
-      'Grade 11',
-      'Grade 12'
+      'Mathematics',
+      'English',
+      'South African Sign Language',
+      'Technology',
+      'Economic Management Sciences',
+      'Life Orientation'
     ];
-  }
-
-  // Utility method to format duration for display
-  String formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-
-    if (hours > 0) {
-      return '${hours}h ${minutes}m ${seconds}s';
-    } else if (minutes > 0) {
-      return '${minutes}m ${seconds}s';
-    } else {
-      return '${seconds}s';
-    }
   }
 }

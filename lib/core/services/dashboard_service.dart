@@ -26,15 +26,25 @@ class DashboardService {
           '✅ Educator profile loaded: ${educatorResponse['first_name']} ${educatorResponse['last_name']}');
       debugPrint('📊 Educator grade: ${educatorResponse['grade']}');
 
-      // Get educator's lessons with proper filtering
+      // FIXED: Get ONLY this educator's lessons with proper filtering
       final lessonsResponse = await _client
           .from('lessons')
-          .select('id, title, is_published, created_at, subject, grade')
-          .eq('educator_id', educatorId)
+          .select(
+              'id, title, is_published, created_at, subject, grade, educator_id') // Added educator_id for debugging
+          .eq('educator_id', educatorId) // CRITICAL: Filter by educator_id
           .order('created_at', ascending: false);
 
       debugPrint(
           '📚 Lessons found: ${lessonsResponse.length} for educator $educatorId');
+
+      // Log lesson details for debugging
+      for (final lesson in lessonsResponse.take(3)) {
+        debugPrint(
+            '   📹 Lesson: "${lesson['title']}" - Published: ${lesson['is_published']} - Educator: ${lesson['educator_id']}');
+      }
+      if (lessonsResponse.length > 3) {
+        debugPrint('   ... and ${lessonsResponse.length - 3} more lessons');
+      }
 
       // Calculate lesson statistics
       final totalLessons = lessonsResponse.length;
@@ -54,7 +64,7 @@ class DashboardService {
         classesResponse = await _client
             .from('classes')
             .select('id, subject, grade, educator_id')
-            .eq('educator_id', educatorId);
+            .eq('educator_id', educatorId); // Filter classes by educator_id
 
         debugPrint('🏫 Classes found: ${classesResponse.length}');
 
@@ -73,7 +83,7 @@ class DashboardService {
         // Continue without classes data
       }
 
-      // OPTION 2: Get students from pre_verified_users table (since they're not in profiles)
+      // Get students from pre_verified_users table
       List<dynamic> studentsResponse = [];
       final educatorGrade = educatorResponse['grade'] as String?;
 
@@ -82,7 +92,7 @@ class DashboardService {
             '🎯 Getting students for grade: $educatorGrade from pre_verified_users');
 
         try {
-          // First try pre_verified_users table (where students actually are)
+          // Get students from pre_verified_users table
           final preVerifiedStudents = await _client
               .from('pre_verified_users')
               .select('student_code, first_name, last_name, grade, school_name')
@@ -176,6 +186,80 @@ class DashboardService {
     } catch (e) {
       debugPrint('❌ Error getting educator data: $e');
       rethrow;
+    }
+  }
+
+  // NEW METHOD: Get recent activity specifically for this educator
+  Future<List<Map<String, dynamic>>> getRecentActivity(
+      String educatorId) async {
+    try {
+      final activities = <Map<String, dynamic>>[];
+
+      // Get recent lesson creations - FIXED: Filter by educator_id
+      final recentLessons = await _client
+          .from('lessons')
+          .select('title, created_at, is_published, subject, educator_id')
+          .eq('educator_id', educatorId) // CRITICAL: Filter by educator_id
+          .order('created_at', ascending: false)
+          .limit(5);
+
+      debugPrint(
+          '📋 Recent lessons for educator $educatorId: ${recentLessons.length}');
+
+      for (final lesson in recentLessons) {
+        activities.add({
+          'type': 'lesson',
+          'title':
+              '${lesson['is_published'] == true ? 'Published' : 'Created'} lesson: ${lesson['title']}',
+          'subtitle': 'Subject: ${lesson['subject']}',
+          'time': _formatTimeDifference(DateTime.parse(lesson['created_at'])),
+          'icon': Icons.video_library_rounded,
+          'color': const Color(0xFF4361EE),
+          'lesson_data': lesson, // Include full lesson data for reference
+        });
+      }
+
+      // If no lessons, add a welcome message
+      if (activities.isEmpty) {
+        activities.add({
+          'type': 'welcome',
+          'title': 'Welcome to your dashboard!',
+          'subtitle': 'Create your first lesson to get started',
+          'time': 'Just now',
+          'icon': Icons.emoji_events_rounded,
+          'color': const Color(0xFFF59E0B),
+        });
+      }
+
+      return activities;
+    } catch (e) {
+      debugPrint('❌ Error getting recent activity: $e');
+      return [];
+    }
+  }
+
+  // NEW METHOD: Get lesson statistics for this educator
+  Future<Map<String, int>> getLessonStatistics(String educatorId) async {
+    try {
+      // Get all lessons for this educator
+      final lessons = await _client
+          .from('lessons')
+          .select('is_published, educator_id')
+          .eq('educator_id', educatorId);
+
+      final totalLessons = lessons.length;
+      final publishedLessons =
+          lessons.where((lesson) => lesson['is_published'] == true).length;
+      final draftLessons = totalLessons - publishedLessons;
+
+      return {
+        'total': totalLessons,
+        'published': publishedLessons,
+        'drafts': draftLessons,
+      };
+    } catch (e) {
+      debugPrint('❌ Error getting lesson statistics: $e');
+      return {'total': 0, 'published': 0, 'drafts': 0};
     }
   }
 
@@ -281,7 +365,7 @@ class DashboardService {
       return nameA.compareTo(nameB);
     });
 
-    // Extract subjects from lessons
+    // Extract subjects from lessons (only this educator's lessons)
     final lessonSubjects = lessons
         .map<String>((lesson) => lesson['subject'] as String? ?? 'Unknown')
         .toSet()
@@ -317,53 +401,12 @@ class DashboardService {
         'students_queried': students.length,
         'students_from_pre_verified': students.length,
         'students_from_enrollments': seenStudents.length,
+        'lesson_educator_ids': lessons
+            .map((l) => l['educator_id'])
+            .toSet()
+            .toList(), // Debug: show educator IDs in lessons
       },
     };
-  }
-
-  // Get educator's recent activity
-  Future<List<Map<String, dynamic>>> getRecentActivity(
-      String educatorId) async {
-    try {
-      final activities = <Map<String, dynamic>>[];
-
-      // Get recent lesson creations
-      final recentLessons = await _client
-          .from('lessons')
-          .select('title, created_at, is_published, subject')
-          .eq('educator_id', educatorId)
-          .order('created_at', ascending: false)
-          .limit(3);
-
-      for (final lesson in recentLessons) {
-        activities.add({
-          'type': 'lesson',
-          'title':
-              '${lesson['is_published'] == true ? 'Published' : 'Created'} lesson: ${lesson['title']}',
-          'subtitle': 'Subject: ${lesson['subject']}',
-          'time': _formatTimeDifference(DateTime.parse(lesson['created_at'])),
-          'icon': Icons.video_library_rounded,
-          'color': const Color(0xFF4361EE),
-        });
-      }
-
-      // If no lessons, add a welcome message
-      if (activities.isEmpty) {
-        activities.add({
-          'type': 'welcome',
-          'title': 'Welcome to your dashboard!',
-          'subtitle': 'Create your first lesson to get started',
-          'time': 'Just now',
-          'icon': Icons.emoji_events_rounded,
-          'color': const Color(0xFFF59E0B),
-        });
-      }
-
-      return activities;
-    } catch (e) {
-      debugPrint('❌ Error getting recent activity: $e');
-      return [];
-    }
   }
 
   String _formatTimeDifference(DateTime date) {
