@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:signsync_academy/core/constants/supabase_config.dart';
 import 'pages/shared/splash_screen.dart' as splash;
@@ -11,21 +11,19 @@ import 'pages/student/dashboard.dart' as student_dashboard; // ✅ Fixed: Added 
 import 'pages/parent/dashboard.dart';
 import 'pages/student/lesson_viewer.dart';
 import 'pages/student/homework_submission.dart';
-import 'pages/student/live_session.dart';
+import 'pages/student/live_session.dart' as student_live; // Renamed import
 import 'pages/educator/lesson_creation.dart';
 import 'pages/educator/video_editor.dart';
 import 'pages/educator/content_management.dart';
 import 'pages/educator/review_submissions.dart';
-import 'pages/educator/live_sessions_manage.dart';
+import 'pages/educator/live_session.dart' as educator_live; // Renamed import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ INITIALIZE SUPABASE FIRST - CORRECT PARAMETERS
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
-    // Session persistence is now enabled by default
   );
 
   runApp(const SignSyncApp());
@@ -43,7 +41,7 @@ class SignSyncApp extends StatelessWidget {
         fontFamily: 'Inter',
         useMaterial3: true,
       ),
-      home: const AuthWrapper(), // ✅ Use auth wrapper instead of direct splash
+      home: const AuthWrapper(),
       debugShowCheckedModeBanner: false,
       routes: {
         // Shared Routes
@@ -65,22 +63,45 @@ class SignSyncApp extends StatelessWidget {
         },
         '/parent/dashboard': (context) => const ParentDashboard(),
 
-        // Student Learning Routes
-        '/student/lesson': (context) => const LessonViewer(),
-        '/student/homework': (context) => const HomeworkSubmission(),
-        '/student/live-session': (context) => const LiveSession(),
+        // Student Learning Routes - FIXED PARAMETERS
+        '/student/lesson': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>? ??
+              {};
+          return LessonViewer(
+            lesson: args['lesson'] ?? {},
+            studentCode: args['studentCode'] ?? '',
+          );
+        },
+        '/student/homework': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>? ??
+              {};
+          return HomeworkSubmission(
+            studentCode: args['studentCode'] ?? '',
+            studentData: args['studentData'] ?? {},
+          );
+        },
+        '/student/live-session': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>? ??
+              {};
+          return student_live.LiveSession(
+            // Use renamed import
+            studentCode: args['studentCode'] ?? '',
+            studentData: args['studentData'] ?? {},
+          );
+        },
 
         // Educator Content Creation Routes
         '/educator/create-lesson': (context) => const LessonCreation(),
-        '/educator/video-editor': (context) => const VideoEditor(
-              filePath: '',
-            ),
+        '/educator/video-editor': (context) => const VideoEditor(),
 
         // Educator Management Routes
         '/educator/content-management': (context) => const ContentManagement(),
         '/educator/review-submissions': (context) => const ReviewSubmissions(),
-        '/educator/live-sessions-manage': (context) =>
-            const LiveSessionsManage(),
+        '/educator/live-session': (context) =>
+            const educator_live.LiveSession(), // Use renamed import
       },
     );
   }
@@ -106,12 +127,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   void _safeCheckAuthState() async {
     try {
-      // ✅ Wait for Supabase to fully initialize
       await Future.delayed(const Duration(milliseconds: 1500));
 
       if (!mounted) return;
 
-      // ✅ Now safely check for current user
       final currentUser = Supabase.instance.client.auth.currentUser;
 
       if (mounted) {
@@ -120,10 +139,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         });
 
         if (currentUser != null) {
-          // User is already logged in - go to dashboard
           _redirectToDashboard(currentUser);
         } else {
-          // No session - go to splash screen
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
@@ -132,7 +149,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
       }
     } catch (e) {
-      // If Supabase fails, show error and go to splash screen
       if (mounted) {
         setState(() {
           _isCheckingAuth = false;
@@ -140,7 +156,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
               'Unable to connect. Please check your internet connection.';
         });
 
-        // After showing error, proceed to splash screen
         await Future.delayed(const Duration(seconds: 2));
         if (mounted) {
           Navigator.pushReplacement(
@@ -158,13 +173,22 @@ class _AuthWrapperState extends State<AuthWrapper> {
       // Get user profile with role and student info
       final profile = await Supabase.instance.client
           .from('profiles')
-          .select('role, student_info')
+          .select(
+              'role, student_code, first_name, last_name, grade, school_name')
           .eq('id', user.id)
           .maybeSingle();
 
       final role = profile?['role'] ?? 'student';
-      final studentInfo =
-          profile?['student_info'] as Map<String, dynamic>? ?? {};
+      final studentCode = profile?['student_code']?.toString() ?? '';
+
+      // Build student data from profile
+      final studentData = {
+        'student_code': studentCode,
+        'first_name': profile?['first_name'] ?? '',
+        'last_name': profile?['last_name'] ?? '',
+        'grade': profile?['grade'] ?? '',
+        'school_name': profile?['school_name'] ?? '',
+      };
 
       if (mounted) {
         switch (role) {
@@ -172,12 +196,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
             Navigator.pushReplacementNamed(context, '/educator/dashboard');
             break;
           case 'student':
-            // ✅ FIXED: Using aliased import for StudentDashboard
             Navigator.pushReplacementNamed(
               context,
               '/student/dashboard',
               arguments: {
-                'student_info': studentInfo,
+                'student_info': studentData,
                 'user_id': user.id,
               },
             );
@@ -194,7 +217,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
       }
     } catch (e) {
-      // If error getting profile, go to splash screen
       if (mounted) {
         Navigator.pushReplacement(
           context,
