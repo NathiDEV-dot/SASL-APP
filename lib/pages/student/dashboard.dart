@@ -1229,7 +1229,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 context,
                 MaterialPageRoute(
                     builder: (context) => HomeworkSubmission(
-                          studentCode: _studentCode,
+                          homeworkId:
+                              'your-homework-id-here', // ✅ FIXED: Changed from studentCode to homeworkId
                           studentData: _studentInfo,
                         )),
               );

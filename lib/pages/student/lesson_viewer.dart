@@ -142,10 +142,20 @@ class _LessonViewerState extends State<LessonViewer> {
 
   Future<void> _checkLessonStatus() async {
     try {
+      // First, get the student's UUID from pre_verified_users using their student code
+      final studentResponse = await Supabase.instance.client
+          .from('pre_verified_users')
+          .select('id')
+          .eq('student_code', widget.studentCode)
+          .eq('role', 'student')
+          .single();
+
+      final studentId = studentResponse['id'] as String;
+
       final response = await Supabase.instance.client
           .from('student_progress')
           .select()
-          .eq('student_id', widget.studentCode)
+          .eq('student_id', studentId) // Use the UUID from pre_verified_users
           .eq('lesson_id', widget.lesson['id'])
           .maybeSingle();
 
@@ -165,9 +175,19 @@ class _LessonViewerState extends State<LessonViewer> {
         _isFavorite = !_isFavorite;
       });
 
+      // First, get the student's UUID from pre_verified_users using their student code
+      final studentResponse = await Supabase.instance.client
+          .from('pre_verified_users')
+          .select('id')
+          .eq('student_code', widget.studentCode)
+          .eq('role', 'student')
+          .single();
+
+      final studentId = studentResponse['id'] as String;
+
       if (_isFavorite) {
         await Supabase.instance.client.from('student_favorites').upsert({
-          'student_id': widget.studentCode,
+          'student_id': studentId, // Use the UUID from pre_verified_users
           'lesson_id': widget.lesson['id'],
           'created_at': DateTime.now().toIso8601String(),
         });
@@ -175,7 +195,7 @@ class _LessonViewerState extends State<LessonViewer> {
         await Supabase.instance.client
             .from('student_favorites')
             .delete()
-            .eq('student_id', widget.studentCode)
+            .eq('student_id', studentId) // Use the UUID from pre_verified_users
             .eq('lesson_id', widget.lesson['id']);
       }
 
@@ -194,49 +214,30 @@ class _LessonViewerState extends State<LessonViewer> {
     }
   }
 
-  Future<void> _downloadVideo() async {
+  Future<void> _downloadVideoSimple() async {
     final videoUrl = widget.lesson['video_url'] as String?;
-    if (videoUrl == null || videoUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No video available for download'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // Request storage permission
-    final status = await Permission.storage.request();
-    if (!status.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Storage permission required to download videos'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
+    if (videoUrl == null || videoUrl.isEmpty) return;
 
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0.0;
-      _downloadCancelToken = CancelToken();
     });
 
     try {
+      // Use application documents directory which doesn't require special permissions
       final directory = await getApplicationDocumentsDirectory();
       final fileName = 'lesson_${widget.lesson['id']}.mp4';
       final filePath = '${directory.path}/$fileName';
 
-      final dio = Dio();
-
-      await dio.download(
+      final response = await Dio().get(
         videoUrl,
-        filePath,
-        cancelToken: _downloadCancelToken,
+        options: Options(
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          receiveTimeout: const Duration(seconds: 30),
+        ),
         onReceiveProgress: (received, total) {
-          if (total != -1) {
+          if (mounted) {
             setState(() {
               _downloadProgress = received / total;
             });
@@ -244,52 +245,30 @@ class _LessonViewerState extends State<LessonViewer> {
         },
       );
 
-      // Update download count in database
-      await Supabase.instance.client.from('lessons').update({
-        'download_count': (widget.lesson['download_count'] ?? 0) + 1,
-      }).eq('id', widget.lesson['id']);
+      final file = File(filePath);
+      await file.writeAsBytes(response.data);
 
       setState(() {
         _downloadedFilePath = filePath;
+        _isDownloading = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Download completed!'),
+        const SnackBar(
+          content: Text('Download completed!'),
           backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'OPEN',
-            textColor: Colors.white,
-            onPressed: () {
-              _showDownloadSuccessDialog(filePath);
-            },
-          ),
         ),
       );
     } catch (e) {
-      if (e is DioException && e.type == DioExceptionType.cancel) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Download cancelled'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Download failed: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloading = false;
-          _downloadCancelToken = null;
-        });
-      }
+      setState(() {
+        _isDownloading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Download failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -445,8 +424,18 @@ class _LessonViewerState extends State<LessonViewer> {
 
   Future<void> _markAsCompleted() async {
     try {
+      // First, get the student's UUID from pre_verified_users using their student code
+      final studentResponse = await Supabase.instance.client
+          .from('pre_verified_users')
+          .select('id')
+          .eq('student_code', widget.studentCode)
+          .eq('role', 'student')
+          .single();
+
+      final studentId = studentResponse['id'] as String;
+
       await Supabase.instance.client.from('student_progress').upsert({
-        'student_id': widget.studentCode,
+        'student_id': studentId, // Use the UUID from pre_verified_users
         'lesson_id': widget.lesson['id'],
         'completed': true,
         'progress_percentage': 100,
@@ -839,7 +828,7 @@ class _LessonViewerState extends State<LessonViewer> {
     return _buildActionButton(
       _downloadedFilePath != null ? Icons.download_done : Icons.download,
       _downloadedFilePath != null ? 'Downloaded' : 'Download',
-      _downloadedFilePath != null ? null : _downloadVideo,
+      _downloadedFilePath != null ? null : _downloadVideoSimple,
       color: _downloadedFilePath != null ? Colors.green : color,
     );
   }
