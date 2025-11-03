@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
 import 'package:signsync_academy/core/services/content_management_service.dart';
-import 'package:signsync_academy/core/services/video_player_service.dart'; // ADD THIS IMPORT
+import 'package:signsync_academy/core/services/video_player_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
 
@@ -131,7 +131,7 @@ class _ContentManagementState extends State<ContentManagement> {
   }
 
   void _createNewLesson() {
-    Navigator.pushNamed(context, '/lesson_creation');
+    Navigator.pushNamed(context, '/live_session');
   }
 
   void _showError(String message) {
@@ -149,6 +149,276 @@ class _ContentManagementState extends State<ContentManagement> {
         content: Text(message),
         backgroundColor: Colors.green,
       ),
+    );
+  }
+
+  // ========== EDIT FUNCTIONALITY ==========
+
+  void _editContent(Map<String, dynamic> video) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildEditBottomSheet(video),
+    );
+  }
+
+  Widget _buildEditBottomSheet(Map<String, dynamic> video) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _getCardColor(),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: _getTextColor().withOpacity(0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Edit Content',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: _getTextColor(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildEditOption(
+            icon: Icons.title_rounded,
+            title: 'Edit Title & Description',
+            onTap: () => _editTitleAndDescription(video),
+          ),
+          _buildEditOption(
+            icon: Icons.video_library_rounded,
+            title: 'Replace Video',
+            onTap: () => _replaceVideo(video),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 1,
+            color: _getBorderColor(),
+          ),
+          const SizedBox(height: 8),
+          _buildEditOption(
+            icon: Icons.delete_rounded,
+            title: 'Delete Lesson',
+            color: Colors.red,
+            onTap: () => _deleteLesson(video),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditOption({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: color ?? _getPrimaryColor(),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: color ?? _getTextColor(),
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      onTap: onTap,
+      contentPadding: EdgeInsets.zero,
+      minLeadingWidth: 24,
+    );
+  }
+
+  void _editTitleAndDescription(Map<String, dynamic> video) {
+    Navigator.pop(context); // Close bottom sheet
+    _showEditDialog(video);
+  }
+
+  void _replaceVideo(Map<String, dynamic> video) async {
+    Navigator.pop(context); // Close bottom sheet
+    try {
+      final newVideo = await _contentService.pickVideoFromGallery();
+      if (newVideo != null) {
+        if (!_contentService.validateVideoFile(newVideo)) {
+          _showError('Video file too large. Maximum size is 500MB.');
+          return;
+        }
+
+        setState(() {
+          _isLoading = true;
+        });
+
+        // Use the ultra-fast replacement with progress
+        await _contentService.replaceLessonVideo(
+          lessonId: video['id'] as String,
+          newVideoFile: newVideo,
+          currentVideoUrl: video['video_url'] as String,
+          onProgress: (progress) {
+            // Update your progress UI here
+            print(
+                'Replacement progress: ${(progress * 100).toStringAsFixed(0)}%');
+          },
+        );
+
+        await _refreshData();
+        _showSuccess('Video replaced successfully');
+      }
+    } catch (e) {
+      _showError('Failed to replace video: ${e.toString()}');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _deleteLesson(Map<String, dynamic> video) {
+    Navigator.pop(context); // Close bottom sheet
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Lesson', style: TextStyle(color: _getTextColor())),
+        content: Text(
+          'Are you sure you want to delete "${video['title']}"? This action cannot be undone.',
+          style: TextStyle(color: _getTextColor()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _performDeleteLesson(video);
+            },
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _performDeleteLesson(Map<String, dynamic> video) async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      await _contentService.deleteLesson(video['id'] as String);
+      await _refreshData();
+      _showSuccess('Lesson deleted successfully');
+    } catch (e) {
+      _showError('Failed to delete lesson: ${e.toString()}');
+    }
+  }
+
+  void _showEditDialog(Map<String, dynamic> video) {
+    final titleController =
+        TextEditingController(text: video['title'] as String);
+    final descriptionController =
+        TextEditingController(text: video['description'] as String? ?? '');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Edit Lesson', style: TextStyle(color: _getTextColor())),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleController,
+              decoration: InputDecoration(
+                labelText: 'Title',
+                border: OutlineInputBorder(),
+              ),
+              maxLength: 100,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: descriptionController,
+              decoration: InputDecoration(
+                labelText: 'Description',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              maxLines: 3,
+              maxLength: 500,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              if (_contentService.validateTitle(titleController.text)) {
+                Navigator.pop(context);
+                await _updateLessonDetails(
+                  video,
+                  titleController.text,
+                  descriptionController.text,
+                );
+              } else {
+                _showError('Please enter a valid title (minimum 2 characters)');
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateLessonDetails(Map<String, dynamic> video, String newTitle,
+      String newDescription) async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      await _contentService.updateLessonTitle(video['id'] as String, newTitle);
+      await _contentService.updateLessonDescription(
+          video['id'] as String, newDescription);
+
+      await _refreshData();
+      _showSuccess('Lesson updated successfully');
+    } catch (e) {
+      _showError('Failed to update lesson: ${e.toString()}');
+    }
+  }
+
+  void _viewAnalytics(Map<String, dynamic> video) {
+    // Navigate to analytics screen
+    Navigator.pushNamed(
+      context,
+      '/review_submissions',
+      arguments: {
+        'lessonId': video['id'],
+        'lessonTitle': video['title'],
+      },
     );
   }
 
@@ -419,7 +689,7 @@ class _ContentManagementState extends State<ContentManagement> {
           crossAxisCount: 2,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: 0.72,
+          childAspectRatio: 0.78, // Fixed overflow by increasing aspect ratio
         ),
         itemCount: displayVideos.length,
         itemBuilder: (context, index) {
@@ -503,7 +773,7 @@ class _ContentManagementState extends State<ContentManagement> {
             child: _buildVideoThumbnail(video, thumbnailUrl, hasVideo),
           ),
 
-          // Content - Flexible but constrained
+          // Content - Flexible but constrained with better spacing to prevent overflow
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -576,9 +846,9 @@ class _ContentManagementState extends State<ContentManagement> {
                     ],
                   ),
 
-                  // Stats - Fixed height with reduced spacing
+                  // Stats - Fixed height with proper spacing to prevent overflow
                   SizedBox(
-                    height: 28, // Reduced from 32px to 28px
+                    height: 24, // Reduced to prevent overflow
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -626,11 +896,9 @@ class _ContentManagementState extends State<ContentManagement> {
             ),
           ),
 
-          // Actions - Fixed height with reduced padding
+          // Actions - Fixed height with proper constraints to prevent overflow
           Container(
-            height: 34, // Reduced from 36px to 34px
-            padding: const EdgeInsets.symmetric(
-                vertical: 2), // Reduced vertical padding
+            height: 32, // Reduced to prevent overflow
             decoration: BoxDecoration(
               border: Border(
                 top: BorderSide(color: _getBorderColor()),
@@ -642,7 +910,7 @@ class _ContentManagementState extends State<ContentManagement> {
                   child: TextButton(
                     onPressed: () => _playVideo(video),
                     style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       minimumSize: Size.zero,
                     ),
                     child: Row(
@@ -663,14 +931,15 @@ class _ContentManagementState extends State<ContentManagement> {
                   ),
                 ),
                 Container(
-                    width: 1,
-                    height: 16,
-                    color: _getBorderColor()), // Reduced height
+                  width: 1,
+                  height: 16,
+                  color: _getBorderColor(),
+                ),
                 Expanded(
                   child: TextButton(
-                    onPressed: () => _editContent(video),
+                    onPressed: () => _editContent(video), // Now working
                     style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       minimumSize: Size.zero,
                     ),
                     child: Row(
@@ -691,14 +960,15 @@ class _ContentManagementState extends State<ContentManagement> {
                   ),
                 ),
                 Container(
-                    width: 1,
-                    height: 16,
-                    color: _getBorderColor()), // Reduced height
+                  width: 1,
+                  height: 16,
+                  color: _getBorderColor(),
+                ),
                 Expanded(
                   child: TextButton(
                     onPressed: () => _viewAnalytics(video),
                     style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       minimumSize: Size.zero,
                     ),
                     child: Row(
@@ -787,14 +1057,6 @@ class _ContentManagementState extends State<ContentManagement> {
         ],
       ),
     );
-  }
-
-  void _editContent(Map<String, dynamic> video) {
-    // Your edit content logic here
-  }
-
-  void _viewAnalytics(Map<String, dynamic> video) {
-    // Your analytics logic here
   }
 
   // Color helper methods

@@ -102,6 +102,52 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
+  // ADDED: Missing homework data loading method
+  Future<void> _loadHomeworkData() async {
+    try {
+      final homeworkData =
+          await _studentService.getHomeworkAssignments(_studentCode);
+      setState(() {
+        _homeworkAssignments = homeworkData;
+      });
+    } catch (e) {
+      _logError('Failed to load homework data', e);
+    }
+  }
+
+  // ADDED: Missing progress calculation method
+  void _calculateProgress() {
+    int completed = 0;
+
+    // Calculate completed lessons based on completion status
+    for (var lesson in _newestLessons) {
+      if (_lessonCompletion[lesson['id']] == true) completed++;
+    }
+    for (var lesson in _recommendedLessons) {
+      if (_lessonCompletion[lesson['id']] == true) completed++;
+    }
+    for (var lesson in _popularLessons) {
+      if (_lessonCompletion[lesson['id']] == true) completed++;
+    }
+    for (var lesson in _gradeLessons) {
+      if (_lessonCompletion[lesson['id']] == true) completed++;
+    }
+
+    // Calculate completed homework
+    for (var homework in _homeworkAssignments) {
+      if (_homeworkCompletion[homework['id']] == true) completed++;
+    }
+
+    setState(() {
+      _completedLessons = completed;
+    });
+  }
+
+  // ADDED: Helper method to check if a lesson is completed
+  bool _isLessonCompleted(Map<String, dynamic> lesson) {
+    return _lessonCompletion[lesson['id']] == true;
+  }
+
   void _navigateToLesson(Map<String, dynamic> lesson) {
     if (lesson.isEmpty) {
       _logWarning('Attempted to navigate to empty lesson');
@@ -679,6 +725,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     final views = (lesson['view_count'] as num?)?.toInt();
     final grade = lesson['grade']?.toString() ?? 'Unknown Grade';
+    final isCompleted =
+        _isLessonCompleted(lesson); // FIXED: Use the helper method
 
     return GestureDetector(
       onTap: () => _navigateToLesson(lesson),
@@ -909,6 +957,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
         ? '${educator['first_name'] ?? ''} ${educator['last_name'] ?? ''}'
             .trim()
         : 'Unknown';
+    final isCompleted =
+        _isLessonCompleted(lesson); // FIXED: Use the helper method
 
     return Container(
       constraints: const BoxConstraints(

@@ -5,7 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path/path.dart' as path;
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:video_compress/video_compress.dart';
+import 'package:path_provider/path_provider.dart';
 
 class LessonCreationService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -75,6 +76,12 @@ class LessonCreationService {
     if (!allowedExtensions.contains(extension)) {
       throw Exception('Unsupported video format');
     }
+
+    // Additional validation for very large files
+    if (fileSize > 100 * 1024 * 1024) {
+      throw Exception(
+          'Video file is very large. Please compress it below 100MB for better compatibility');
+    }
   }
 
   // Get video duration
@@ -88,6 +95,42 @@ class LessonCreationService {
     }
   }
 
+  // CORRECTED: Transcode video to compatible format
+  Future<File> transcodeVideoToCompatibleFormat(File originalVideo) async {
+    try {
+      print('Starting video transcoding for compatibility...');
+
+      // Initialize video compression
+      await VideoCompress.setLogLevel(0);
+
+      // Get temporary directory
+      final tempDir = await getTemporaryDirectory();
+      final outputPath =
+          '${tempDir.path}/compatible_${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+      // CORRECTED: Use the proper compressVideo method without outputPath parameter
+      final MediaInfo? mediaInfo = await VideoCompress.compressVideo(
+        originalVideo.path,
+        quality: VideoQuality.MediumQuality,
+        deleteOrigin: false,
+        includeAudio: true,
+      );
+
+      if (mediaInfo == null || mediaInfo.file == null) {
+        throw Exception('Video transcoding failed');
+      }
+
+      print('Video transcoding completed: ${mediaInfo.file!.path}');
+
+      // CORRECTED: The compressed file is already saved, we just need to return it
+      return File(mediaInfo.file!.path);
+    } catch (e) {
+      print('Video transcoding error: $e');
+      // If transcoding fails, return original file as fallback
+      return originalVideo;
+    }
+  }
+
   // Upload video to Supabase
   Future<String> uploadVideo({
     required String lessonId,
@@ -96,14 +139,43 @@ class LessonCreationService {
     required Function(double) onProgress,
   }) async {
     try {
-      final fileName =
-          'video_${DateTime.now().millisecondsSinceEpoch}${path.extension(videoFile.path)}';
+      // Step 1: Transcode video first (30% of progress)
+      print('Starting video transcoding...');
+      onProgress(0.1);
+
+      final compatibleVideo = await transcodeVideoToCompatibleFormat(videoFile);
+      onProgress(0.3);
+
+      // Step 2: Upload transcoded video (70% of progress)
+      final fileName = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       final filePath = '$educatorId/$lessonId/$fileName';
 
-      await _client.storage.from('videos').upload(filePath, videoFile);
+      print('Uploading transcoded video...');
+
+      // Upload with progress tracking
+      await _client.storage.from('videos').uploadBinary(
+            filePath,
+            await compatibleVideo.readAsBytes(),
+            fileOptions: const FileOptions(
+              upsert: true,
+            ),
+          );
+
+      onProgress(1.0);
+
+      // Clean up temporary file
+      try {
+        if (compatibleVideo.path != videoFile.path) {
+          await compatibleVideo.delete();
+        }
+      } catch (e) {
+        print('Could not delete temporary video file: $e');
+      }
+
       return _client.storage.from('videos').getPublicUrl(filePath);
     } catch (e) {
-      throw Exception('Failed to upload video');
+      print('Video upload failed: $e');
+      throw Exception('Failed to upload video: ${e.toString()}');
     }
   }
 
@@ -136,11 +208,12 @@ class LessonCreationService {
 
       return _client.storage.from('thumbnails').getPublicUrl(filePath);
     } catch (e) {
+      print('Thumbnail generation failed: $e');
       return null;
     }
   }
 
-  // Create lesson in database
+  // Create lesson in database - UPDATED FOR PUBLISHING OPTIONS
   Future<String> createLesson({
     required String title,
     required String subject,
@@ -152,6 +225,20 @@ class LessonCreationService {
     DateTime? scheduledPublish,
   }) async {
     try {
+      // Determine the actual publish status
+      final bool actualIsPublished;
+      final String? actualScheduledPublish; // CORRECTED: Changed to String?
+
+      if (scheduledPublish != null) {
+        // If scheduled for future, set as unpublished and store scheduled time
+        actualIsPublished = false;
+        actualScheduledPublish = scheduledPublish.toIso8601String();
+      } else {
+        // If no schedule time, use the isPublished flag directly
+        actualIsPublished = isPublished;
+        actualScheduledPublish = null;
+      }
+
       final response = await _client.from('lessons').insert({
         'title': title,
         'subject': subject,
@@ -159,27 +246,33 @@ class LessonCreationService {
         'duration': durationSeconds,
         'educator_id': educatorId,
         'description': description,
-        'is_published': isPublished,
-        'scheduled_publish': scheduledPublish?.toIso8601String(),
+        'is_published': actualIsPublished,
+        'scheduled_publish': actualScheduledPublish,
         'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
       }).select('id');
 
       if (response.isEmpty) throw Exception('No ID returned');
-      return response.first['id'] as String;
+
+      final lessonId = response.first['id'] as String;
+      print(
+          'Lesson created with ID: $lessonId, Published: $actualIsPublished, Scheduled: $actualScheduledPublish');
+
+      return lessonId;
     } catch (e) {
-      throw Exception('Failed to create lesson');
+      print('Failed to create lesson: $e');
+      throw Exception('Failed to create lesson: ${e.toString()}');
     }
   }
 
-  // ADD THIS MISSING METHOD - Update lesson with media URLs
+  // Update lesson with media URLs
   Future<void> updateLessonMedia({
     required String lessonId,
     required String videoUrl,
     String? thumbnailUrl,
   }) async {
     try {
-      final updateData = {
+      final updateData = <String, dynamic>{
         'video_url': videoUrl,
         'updated_at': DateTime.now().toIso8601String(),
       };
@@ -189,45 +282,122 @@ class LessonCreationService {
       }
 
       await _client.from('lessons').update(updateData).eq('id', lessonId);
+      print('Lesson media updated for: $lessonId');
     } catch (e) {
-      throw Exception('Failed to update lesson media');
+      print('Failed to update lesson media: $e');
+      throw Exception('Failed to update lesson media: ${e.toString()}');
     }
   }
 
-  // Update lesson with video URLs (for backward compatibility)
-  Future<void> updateLessonUrls({
-    required String lessonId,
-    required String videoUrl,
-    required String thumbnailUrl,
-  }) async {
+  // NEW: Publish lesson immediately
+  Future<void> publishLessonNow(String lessonId) async {
     try {
       await _client.from('lessons').update({
-        'video_url': videoUrl,
-        'thumbnail_url': thumbnailUrl,
+        'is_published': true,
+        'scheduled_publish': null, // Clear any scheduled time
+        'published_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', lessonId);
+
+      print('Lesson published immediately: $lessonId');
     } catch (e) {
-      throw Exception('Failed to update lesson URLs');
+      print('Failed to publish lesson: $e');
+      throw Exception('Failed to publish lesson: ${e.toString()}');
     }
   }
 
-  // Schedule lesson for later publication
+  // NEW: Schedule lesson for later publication
   Future<void> scheduleLesson({
     required String lessonId,
     required DateTime publishDate,
   }) async {
     try {
+      // Validate schedule time (must be in future)
+      if (publishDate.isBefore(DateTime.now())) {
+        throw Exception('Schedule time must be in the future');
+      }
+
       await _client.from('lessons').update({
-        'scheduled_publish': publishDate.toIso8601String(),
         'is_published': false,
+        'scheduled_publish': publishDate.toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', lessonId);
+
+      print('Lesson scheduled for: $publishDate, ID: $lessonId');
     } catch (e) {
-      throw Exception('Failed to schedule lesson');
+      print('Failed to schedule lesson: $e');
+      throw Exception('Failed to schedule lesson: ${e.toString()}');
     }
   }
 
-  // ULTRA-FAST Lesson Creation Method
+  // NEW: Get scheduled lessons that need to be published
+  Future<List<Map<String, dynamic>>> getLessonsToPublish() async {
+    try {
+      final now = DateTime.now().toIso8601String();
+
+      final response = await _client
+          .from('lessons')
+          .select('*')
+          .lt('scheduled_publish', now) // Less than current time
+          .eq('is_published', false);
+
+      return (response as List).cast<Map<String, dynamic>>();
+    } catch (e) {
+      print('Error getting lessons to publish: $e');
+      return [];
+    }
+  }
+
+  // NEW: Publish scheduled lessons (to be called by a background service)
+  Future<void> publishScheduledLessons() async {
+    try {
+      final lessonsToPublish = await getLessonsToPublish();
+
+      for (final lesson in lessonsToPublish) {
+        final lessonId = lesson['id'] as String;
+        await publishLessonNow(lessonId);
+        print('Auto-published scheduled lesson: $lessonId');
+      }
+    } catch (e) {
+      print('Error publishing scheduled lessons: $e');
+    }
+  }
+
+  // NEW: Update existing lesson's publishing status
+  Future<void> updateLessonPublishing({
+    required String lessonId,
+    bool? isPublished,
+    DateTime? scheduledPublish,
+  }) async {
+    try {
+      final updateData = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      if (isPublished != null) {
+        updateData['is_published'] = isPublished;
+        if (isPublished) {
+          updateData['published_at'] = DateTime.now().toIso8601String();
+          updateData['scheduled_publish'] =
+              null; // Clear schedule if publishing now
+        }
+      }
+
+      if (scheduledPublish != null) {
+        updateData['scheduled_publish'] = scheduledPublish.toIso8601String();
+        updateData['is_published'] =
+            false; // Ensure it's not published immediately
+      }
+
+      await _client.from('lessons').update(updateData).eq('id', lessonId);
+      print('Lesson publishing updated: $lessonId');
+    } catch (e) {
+      print('Failed to update lesson publishing: $e');
+      throw Exception('Failed to update lesson publishing: ${e.toString()}');
+    }
+  }
+
+  // ULTRA-FAST Lesson Creation Method - UPDATED FOR PUBLISHING OPTIONS
   Future<void> createLessonUltraFast({
     required String title,
     required String subject,
@@ -289,8 +459,11 @@ class LessonCreationService {
       );
 
       onProgress(1.0);
+
+      print('Lesson creation completed: $lessonId');
     } catch (e) {
       await _cleanupCameraResources();
+      print('Lesson creation failed: $e');
       rethrow;
     }
   }
@@ -334,5 +507,49 @@ class LessonCreationService {
       'Economic Management Sciences',
       'Life Orientation'
     ];
+  }
+
+  // NEW: Get lesson by ID
+  Future<Map<String, dynamic>?> getLesson(String lessonId) async {
+    try {
+      final response =
+          await _client.from('lessons').select('*').eq('id', lessonId).single();
+
+      return response as Map<String, dynamic>?;
+    } catch (e) {
+      print('Error getting lesson: $e');
+      return null;
+    }
+  }
+
+  // NEW: Check if lesson is scheduled
+  Future<bool> isLessonScheduled(String lessonId) async {
+    try {
+      final lesson = await getLesson(lessonId);
+      if (lesson == null) return false;
+
+      final scheduledPublish = lesson['scheduled_publish'];
+      final isPublished = lesson['is_published'] as bool? ?? false;
+
+      return scheduledPublish != null && !isPublished;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // NEW: Get scheduled publish time
+  Future<DateTime?> getScheduledPublishTime(String lessonId) async {
+    try {
+      final lesson = await getLesson(lessonId);
+      if (lesson == null) return null;
+
+      final scheduledPublish = lesson['scheduled_publish'];
+      if (scheduledPublish == null) return null;
+
+      return DateTime.parse(
+          scheduledPublish as String); // CORRECTED: Cast to String
+    } catch (e) {
+      return null;
+    }
   }
 }
