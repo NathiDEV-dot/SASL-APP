@@ -34,12 +34,16 @@ dependencies:
   camerawesome: ^2.5.0
   dotted_border: ^3.1.0
   dio: ^5.9.0
- 
+  mockito: ^5.4.2
+  build_runner: ^2.4.7
+  
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
+
+
 
 flutter:
   uses-material-design: true

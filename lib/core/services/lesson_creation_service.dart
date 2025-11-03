@@ -1,3 +1,5 @@
+// ignore_for_file: duplicate_import
+
 import 'dart:async';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';

@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, unused_field, unused_element, unused_import
 
 import 'package:flutter/material.dart';
 import 'package:flutter_downloader/flutter_downloader.dart';
@@ -838,3 +838,4 @@ class _ContentManagementState extends State<ContentManagement> {
     return const Color(0xFF3B82F6);
   }
 }
+
