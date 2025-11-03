@@ -17,6 +17,10 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
   final AuthService _authService = AuthService();
   bool _isLoading = false;
 
+  void _navigateToWelcomeScreen() {
+    Navigator.pushReplacementNamed(context, '/welcome');
+  }
+
   void _submitForm() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
@@ -50,12 +54,6 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
         }
       }
     }
-  }
-
-  void _fillDemoCode() {
-    setState(() {
-      _studentCodeController.text = 'TOD001';
-    });
   }
 
   void _showError(String message) {
@@ -93,22 +91,28 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
           ),
           child: Column(
             children: [
-              // Custom App Bar
+              // Enhanced Header with better back button
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: _navigateToWelcomeScreen,
+                      ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 16),
                     const Text(
                       'Parent Access',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: 20,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -117,33 +121,31 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
               ),
               Expanded(
                 child: Container(
-                  margin: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: _getCardColor(),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 20,
+                        color: Colors.black.withOpacity(0.15),
+                        blurRadius: 25,
                         offset: const Offset(0, 10),
                       ),
                     ],
                   ),
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(32),
                     child: Form(
                       key: _formKey,
                       child: Column(
                         children: [
                           _buildHeader(),
-                          const SizedBox(height: 32),
-
-                          // Student Code Field
+                          const SizedBox(height: 40),
                           _buildTextFieldWithIcon(
                             controller: _studentCodeController,
                             label: 'Student Code',
-                            hintText: 'Enter student code (e.g., TOD001)',
+                            hintText: 'Enter your child\'s student code',
                             icon: Icons.person_rounded,
                             keyboardType: TextInputType.text,
                             textInputAction: TextInputAction.done,
@@ -157,52 +159,35 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 20),
-
-                          // Demo Code Button
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: _isLoading ? null : _fillDemoCode,
-                              icon: const Icon(Icons.visibility_rounded,
-                                  size: 18),
-                              label: const Text('Fill Demo Student Code'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF667EEA),
-                                side:
-                                    const BorderSide(color: Color(0xFF667EEA)),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                          const SizedBox(height: 24),
+                          // Help text
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.help_outline_rounded,
+                                  color: Colors.grey[500],
+                                  size: 16,
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Your child\'s student code was provided by their educator',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[600],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 10),
-
-                          // Info Text
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            child: Text(
-                              'Enter your child\'s student code to access their academic information',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: _getTextColor().withOpacity(0.7),
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 30),
-
-                          // Submit Button
+                          const SizedBox(height: 48),
                           _buildSubmitButton(),
-
-                          // Student Codes Info
-                          const SizedBox(height: 30),
-                          _buildStudentCodesInfo(),
+                          const SizedBox(height: 40),
+                          _buildSecurityInfo(),
                         ],
                       ),
                     ),
@@ -219,42 +204,52 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
   Widget _buildHeader() {
     return Column(
       children: [
+        // Enhanced Hero Icon
         Container(
-          width: 80,
-          height: 80,
+          width: 120,
+          height: 120,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(30),
             boxShadow: [
               BoxShadow(
                 color: const Color(0xFF667EEA).withOpacity(0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
-          child: const Icon(Icons.family_restroom_rounded,
-              color: Colors.white, size: 40),
+          child: const Icon(
+            Icons.family_restroom_rounded,
+            color: Colors.white,
+            size: 50,
+          ),
         ),
-        const SizedBox(height: 20),
-        Text(
+        const SizedBox(height: 28),
+        // Enhanced Title
+        const Text(
           'Parent Portal',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w700,
-            color: _getTextColor(),
+            color: Colors.black87,
+            height: 1.3,
           ),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
-        Text(
-          'Track your child\'s academic progress and attendance',
+        // Enhanced Subtitle
+        const Text(
+          'Track your child\'s academic progress, attendance, and learning journey',
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 16,
-            color: _getTextColor().withOpacity(0.7),
+            color: Colors.grey,
+            height: 1.5,
           ),
         ),
       ],
@@ -284,12 +279,12 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.05),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -299,29 +294,40 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
             textInputAction: textInputAction,
             validator: validator,
             onFieldSubmitted: (_) => _submitForm(),
+            style: TextStyle(
+              color: _getTextColor(),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
             decoration: InputDecoration(
               hintText: hintText,
               hintStyle: TextStyle(color: _getHintColor()),
-              prefixIcon: Icon(icon, color: _getIconColor()),
+              prefixIcon: Container(
+                margin: const EdgeInsets.all(12),
+                child: Icon(icon, color: _getIconColor(), size: 24),
+              ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: _getBorderColor()),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: _getBorderColor()),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Color(0xFF667EEA), width: 2),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(
+                  color: Color(0xFF667EEA),
+                  width: 2,
+                ),
               ),
               filled: true,
               fillColor: _getTextFieldBackgroundColor(),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 18,
+              ),
             ),
-            style: TextStyle(color: _getTextColor(), fontSize: 16),
           ),
         ),
       ],
@@ -329,120 +335,111 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
   }
 
   Widget _buildSubmitButton() {
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF667EEA).withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _submitForm,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF667EEA),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
+      height: 58,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF667EEA).withOpacity(0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: _isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ? Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF667EEA),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
                 ),
               )
-            : const Text(
-                'Access Student Info',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+            : ElevatedButton(
+                onPressed: _submitForm,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF667EEA),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.family_restroom_rounded,
+                      size: 20,
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      'View Student Info', // Fixed: Shorter text to prevent overflow
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
       ),
     );
   }
 
-  Widget _buildStudentCodesInfo() {
+  Widget _buildSecurityInfo() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.blue[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue[100]!),
+        color: const Color(0xFF667EEA).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF667EEA).withOpacity(0.2),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: const Column(
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.info_rounded, color: Colors.blue, size: 18),
-              SizedBox(width: 8),
-              Text(
-                'Student Codes',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue,
+              Icon(
+                Icons.security_rounded,
+                color: Color(0xFF667EEA),
+                size: 20,
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Secure Parent Access',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF667EEA),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
-            'Use student codes starting with TOD (e.g., TOD001, TOD002, etc.)',
+            'Your child\'s student code ensures secure access to their academic information while maintaining privacy and data protection.',
             style: TextStyle(
-              fontSize: 12,
-              color: Colors.blue[700],
+              fontSize: 13,
+              color: Color(0xFF667EEA),
+              height: 1.4,
             ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              _buildStudentChip('TOD001 - Lihle Mthembu (Gr1)'),
-              _buildStudentChip('TOD009 - Ayanda Zulu (Gr2)'),
-              _buildStudentChip('TOD017 - Inez Viljoen (Gr3)'),
-              _buildStudentChip('TOD025 - Qhawe Khumalo (Gr4)'),
-              _buildStudentChip('TOD033 - Yanga Mbatha (Gr5)'),
-              _buildStudentChip('TOD041 - Gail Botha (Gr6)'),
-              _buildStudentChip('TOD049 - Oliver Cohen (Gr7)'),
-              _buildStudentChip('TOD057 - Wesley Moloi (Gr8)'),
-              _buildStudentChip('TOD065 - Elaine de Wet (Gr9)'),
-              _buildStudentChip('TOD073 - Michael Mthembu (Gr10)'),
-              _buildStudentChip('TOD081 - Ulrich Zulu (Gr11)'),
-              _buildStudentChip('TOD089 - Candice Viljoen (Gr12)'),
-            ],
+            textAlign: TextAlign.left,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildStudentChip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.blue[200]!),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          color: Colors.blue[800],
-          fontWeight: FontWeight.w500,
-        ),
       ),
     );
   }
@@ -451,13 +448,13 @@ class _ParentAuthScreenState extends State<ParentAuthScreen> {
   Color _getTextFieldBackgroundColor() {
     return Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF2D2D3E)
-        : const Color(0xFFF0F4F8);
+        : const Color(0xFFF8FAFC);
   }
 
   Color _getTextColor() {
     return Theme.of(context).brightness == Brightness.dark
         ? Colors.white
-        : const Color(0xFF2D3748);
+        : const Color(0xFF1A202C);
   }
 
   Color _getCardColor() {
