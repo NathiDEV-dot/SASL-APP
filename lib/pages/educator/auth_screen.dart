@@ -36,6 +36,10 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
     });
   }
 
+  void _navigateToWelcomeScreen() {
+    Navigator.pushReplacementNamed(context, '/welcome');
+  }
+
   void _submitForm() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
@@ -157,14 +161,6 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
     });
   }
 
-  void _fillDemoCredentials() {
-    setState(() {
-      _emailController.text = 'zanele.mthembu@transorange.school.za';
-      _passwordController.text = 'Educator123!';
-      _confirmPasswordController.text = 'Educator123!';
-    });
-  }
-
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -225,21 +221,28 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
           ),
           child: Column(
             children: [
+              // Enhanced Header with better back button
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: _navigateToWelcomeScreen,
+                      ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 16),
                     Text(
                       _isSignUpMode ? 'Educator Sign Up' : 'Educator Login',
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: 20,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -248,27 +251,27 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
               ),
               Expanded(
                 child: Container(
-                  margin: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: _getCardColor(),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 20,
+                        color: Colors.black.withOpacity(0.15),
+                        blurRadius: 25,
                         offset: const Offset(0, 10),
                       ),
                     ],
                   ),
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(32),
                     child: Form(
                       key: _formKey,
                       child: Column(
                         children: [
                           _buildHeader(),
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 40),
                           _buildTextFieldWithIcon(
                             controller: _emailController,
                             label: 'School Email',
@@ -286,7 +289,7 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 24),
                           _buildTextFieldWithIcon(
                             controller: _passwordController,
                             label: 'Password',
@@ -315,7 +318,7 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 24),
                           if (_isSignUpMode) ...[
                             _buildTextFieldWithIcon(
                               controller: _confirmPasswordController,
@@ -343,49 +346,48 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
                                 return null;
                               },
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 24),
                           ],
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed:
-                                  _isLoading ? null : _fillDemoCredentials,
-                              icon: const Icon(Icons.visibility_rounded,
-                                  size: 18),
-                              label: const Text('Fill Demo Credentials'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF667EEA),
-                                side:
-                                    const BorderSide(color: Color(0xFF667EEA)),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                          // Enhanced Info Section
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF667EEA).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFF667EEA).withOpacity(0.2),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline_rounded,
+                                  color: const Color(0xFF667EEA),
+                                  size: 20,
                                 ),
-                              ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _isSignUpMode
+                                        ? 'Use your pre-registered school email to create your educator account'
+                                        : 'Sign in with your school credentials',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: _getTextColor().withOpacity(0.8),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            child: Text(
-                              _isSignUpMode
-                                  ? 'Create your educator account using your pre-registered school email'
-                                  : 'Sign in to your educator account',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: _getTextColor().withOpacity(0.7),
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 30),
+                          const SizedBox(height: 32),
                           _buildSubmitButton(),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 24),
                           _buildToggleAuthMode(),
-                          const SizedBox(height: 30),
-                          _buildEducatorAccountsInfo(),
+                          const SizedBox(height: 32),
+                          // Security Info Section
+                          _buildSecurityInfo(),
                         ],
                       ),
                     ),
@@ -402,44 +404,54 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
   Widget _buildHeader() {
     return Column(
       children: [
+        // Enhanced Hero Icon
         Container(
-          width: 80,
-          height: 80,
+          width: 120,
+          height: 120,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(30),
             boxShadow: [
               BoxShadow(
                 color: const Color(0xFF667EEA).withOpacity(0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+                blurRadius: 15,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
-          child:
-              const Icon(Icons.school_rounded, color: Colors.white, size: 40),
+          child: const Icon(
+            Icons.school_rounded,
+            color: Colors.white,
+            size: 50,
+          ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 28),
+        // Enhanced Title
         Text(
           _isSignUpMode ? 'Educator Sign Up' : 'Educator Portal',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w700,
             color: _getTextColor(),
+            height: 1.3,
           ),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
+        // Enhanced Subtitle
         Text(
           _isSignUpMode
-              ? 'Create your account to access your teaching dashboard'
+              ? 'Create your account to access your teaching dashboard and manage classes'
               : 'Access your teaching dashboard and manage your classes',
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 16,
             color: _getTextColor().withOpacity(0.7),
+            height: 1.5,
           ),
         ),
       ],
@@ -471,12 +483,12 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.05),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -489,27 +501,38 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
             decoration: InputDecoration(
               hintText: hintText,
               hintStyle: TextStyle(color: _getHintColor()),
-              prefixIcon: Icon(icon, color: _getIconColor()),
+              prefixIcon: Container(
+                margin: const EdgeInsets.all(12),
+                child: Icon(icon, color: _getIconColor(), size: 24),
+              ),
               suffixIcon: suffixIcon,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: _getBorderColor()),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: _getBorderColor()),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: Color(0xFF667EEA), width: 2),
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(
+                  color: Color(0xFF667EEA),
+                  width: 2,
+                ),
               ),
               filled: true,
               fillColor: _getTextFieldBackgroundColor(),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 18,
+              ),
             ),
-            style: TextStyle(color: _getTextColor(), fontSize: 16),
+            style: TextStyle(
+              color: _getTextColor(),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ],
@@ -517,43 +540,65 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
   }
 
   Widget _buildSubmitButton() {
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF667EEA).withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _submitForm,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF667EEA),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
+      height: 58,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF667EEA).withOpacity(0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: _isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ? Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF667EEA),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
                 ),
               )
-            : Text(
-                _isSignUpMode ? 'Create Account' : 'Sign In',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+            : ElevatedButton(
+                onPressed: _submitForm,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF667EEA),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      _isSignUpMode
+                          ? Icons.person_add_rounded
+                          : Icons.login_rounded,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _isSignUpMode ? 'Create Account' : 'Sign In',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
       ),
@@ -570,6 +615,7 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
               : 'Need to create an account?',
           style: TextStyle(
             color: _getTextColor().withOpacity(0.7),
+            fontSize: 15,
           ),
         ),
         const SizedBox(width: 8),
@@ -580,6 +626,7 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
             style: const TextStyle(
               color: Color(0xFF667EEA),
               fontWeight: FontWeight.w600,
+              fontSize: 15,
             ),
           ),
         ),
@@ -587,85 +634,48 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
     );
   }
 
-  Widget _buildEducatorAccountsInfo() {
+  Widget _buildSecurityInfo() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.blue[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue[100]!),
+        color: const Color(0xFF667EEA).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF667EEA).withOpacity(0.2),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: const Column(
         children: [
           Row(
             children: [
               Icon(
-                _isSignUpMode ? Icons.person_add_rounded : Icons.info_rounded,
-                color: Colors.blue,
-                size: 18,
+                Icons.security_rounded,
+                color: Color(0xFF667EEA),
+                size: 20,
               ),
-              const SizedBox(width: 8),
-              Text(
-                _isSignUpMode
-                    ? 'Pre-registered Educators'
-                    : 'Educator Accounts',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue,
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Secure Educator Access',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF667EEA),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
-            _isSignUpMode
-                ? 'Use your pre-registered school email to create your account'
-                : 'All educators use password: Educator123!',
+            'Your school email ensures secure access to the educator portal with appropriate permissions and class management capabilities.',
             style: TextStyle(
-              fontSize: 12,
-              color: Colors.blue[700],
+              fontSize: 13,
+              color: Color(0xFF667EEA),
+              height: 1.4,
             ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              _buildEducatorChip('Grade 1: Zanele Mthembu'),
-              _buildEducatorChip('Grade 2: Johan Venter'),
-              _buildEducatorChip('Grade 3: Lerato Moloi'),
-              _buildEducatorChip('Grade 4: Sarah Ndlovu'),
-              _buildEducatorChip('Grade 5: Thabo Mokoena'),
-              _buildEducatorChip('Grade 6: Nadia van Wyk'),
-              _buildEducatorChip('Grade 7: Bongani Zulu'),
-              _buildEducatorChip('Grade 8: Maria Botha'),
-              _buildEducatorChip('Grade 9: Sipho Khumalo'),
-              _buildEducatorChip('Grade 10: Annelise de Wet'),
-              _buildEducatorChip('Grade 11: Kgosi Malema'),
-              _buildEducatorChip('Grade 12: Elizabeth Smith'),
-            ],
+            textAlign: TextAlign.left,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildEducatorChip(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.blue[200]!),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          color: Colors.blue[800],
-          fontWeight: FontWeight.w500,
-        ),
       ),
     );
   }
@@ -674,13 +684,13 @@ class _EducatorAuthScreenState extends State<EducatorAuthScreen> {
   Color _getTextFieldBackgroundColor() {
     return Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF2D2D3E)
-        : const Color(0xFFF0F4F8);
+        : const Color(0xFFF8FAFC);
   }
 
   Color _getTextColor() {
     return Theme.of(context).brightness == Brightness.dark
         ? Colors.white
-        : const Color(0xFF2D3748);
+        : const Color(0xFF1A202C);
   }
 
   Color _getCardColor() {
