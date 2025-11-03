@@ -34,6 +34,7 @@ dependencies:
   camerawesome: ^2.5.0
   dotted_border: ^3.1.0
   dio: ^5.9.0
+  
  
 
 dev_dependencies:

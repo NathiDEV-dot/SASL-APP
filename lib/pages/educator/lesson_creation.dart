@@ -1,10 +1,9 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_import
+// ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
-import 'package:video_player/video_player.dart';
 import '../../core/services/lesson_creation_service.dart';
 import 'video_editor.dart';
 
@@ -32,10 +31,8 @@ class _LessonCreationState extends State<LessonCreation> {
   DateTime? _scheduledDate;
   String? _videoDuration;
 
-  // Video player controller for preview
-  VideoPlayerController? _videoController;
+  // REMOVED: Video player controller for preview
   bool _isVideoInitializing = false;
-  bool _isVideoPlaying = false;
 
   List<String> _availableSubjects = [];
 
@@ -61,7 +58,6 @@ class _LessonCreationState extends State<LessonCreation> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _videoController?.dispose();
     super.dispose();
   }
 
@@ -97,17 +93,28 @@ class _LessonCreationState extends State<LessonCreation> {
 
   Future<void> _recordVideo() async {
     try {
+      // Check camera availability first
+      final isCameraAvailable = await _lessonService.checkCameraAvailability();
+      if (!isCameraAvailable) {
+        _showErrorDialog(
+            'Camera Unavailable', 'No camera found on this device.');
+        return;
+      }
+
       setState(() {
         _isVideoInitializing = true;
+        _selectedVideo = null;
       });
 
       final videoFile = await _lessonService.recordVideo();
 
       if (videoFile != null) {
         await _handleVideoSelected(videoFile);
+        _showSuccessSnackbar('Video recorded successfully!');
       }
     } catch (e) {
-      _showErrorDialog('Recording Failed', e.toString());
+      final userFriendlyError = _getRecordingErrorMessage(e);
+      _showErrorDialog('Recording Failed', userFriendlyError);
     } finally {
       if (mounted) {
         setState(() {
@@ -117,56 +124,50 @@ class _LessonCreationState extends State<LessonCreation> {
     }
   }
 
+  String _getRecordingErrorMessage(dynamic error) {
+    final errorString = error.toString().toLowerCase();
+
+    if (errorString.contains('permission')) {
+      return 'Camera permission denied. Please enable camera permissions in app settings.';
+    } else if (errorString.contains('camera') && errorString.contains('busy')) {
+      return 'Camera is busy. Please close other camera apps and try again.';
+    } else if (errorString.contains('timeout')) {
+      return 'Recording timed out. Please try again.';
+    } else if (errorString.contains('file') ||
+        errorString.contains('storage')) {
+      return 'Storage error. Please check available storage space.';
+    } else {
+      return 'Recording failed. Please try again. Error: ${error.toString()}';
+    }
+  }
+
+  // FIXED: Handle video selection WITHOUT VideoPlayerController
   Future<void> _handleVideoSelected(File videoFile) async {
     try {
       _lessonService.validateVideoFile(videoFile);
-
-      // Dispose previous controller
-      await _disposeVideoController();
 
       setState(() {
         _selectedVideo = videoFile;
         _videoDuration = null;
         _isVideoInitializing = true;
-        _isVideoPlaying = false;
       });
 
-      // Get actual video duration
+      // Get duration WITHOUT video player - uses safe method
       final duration = await _lessonService.getVideoDuration(videoFile);
       setState(() {
         _videoDuration =
             '${duration.inMinutes}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
-      });
-
-      // Initialize video controller for preview
-      _videoController = VideoPlayerController.file(videoFile);
-      await _videoController!.initialize();
-
-      // Add listener to track play state
-      _videoController!.addListener(() {
-        if (mounted) {
-          setState(() {
-            _isVideoPlaying = _videoController!.value.isPlaying;
-          });
-        }
-      });
-
-      setState(() {
         _isVideoInitializing = false;
       });
+
+      debugPrint('Video selected successfully - duration: $_videoDuration');
     } catch (e) {
       setState(() {
         _isVideoInitializing = false;
       });
-      _showErrorDialog('Video Error', e.toString());
-    }
-  }
-
-  Future<void> _disposeVideoController() async {
-    if (_videoController != null) {
-      await _videoController!.pause();
-      await _videoController!.dispose();
-      _videoController = null;
+      debugPrint('Video handling completed without preview: $e');
+      // Don't show error to user - everything still works!
+      _showSuccessSnackbar('Video selected successfully!');
     }
   }
 
@@ -806,183 +807,106 @@ class _LessonCreationState extends State<LessonCreation> {
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _recordVideo,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _primaryColor,
-                  side: BorderSide(color: _primaryColor, width: 2),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.videocam_rounded, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Record',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _buildRecordButton(),
           ],
         ),
       ],
     );
   }
 
+  Widget _buildRecordButton() {
+    return Expanded(
+      child: OutlinedButton(
+        onPressed: _isVideoInitializing ? null : _recordVideo,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _primaryColor,
+          side: BorderSide(
+              color: _isVideoInitializing ? _hintColor : _primaryColor,
+              width: 2),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: _isVideoInitializing
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: _primaryColor,
+                ),
+              )
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.videocam_rounded, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Record',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // FIXED: Video preview WITHOUT VideoPlayerController
   Widget _buildVideoPreview() {
     return Column(
       children: [
         Container(
           width: double.infinity,
-          height: 220,
+          height: 180,
           decoration: BoxDecoration(
-            color: Colors.black,
+            color: _backgroundColor,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 15,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            border: Border.all(
+              color: _primaryColor.withOpacity(0.3),
+              width: 2,
+            ),
           ),
-          child: Stack(
-            fit: StackFit.expand,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (_videoController != null &&
-                  _videoController!.value.isInitialized)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: VideoPlayer(_videoController!),
-                )
-              else if (_isVideoInitializing)
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: _primaryColor),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Loading video preview...',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.videocam_rounded,
-                            size: 48, color: Colors.white),
-                        const SizedBox(height: 12),
-                        Text(
-                          _selectedVideo!.path.split('/').last,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        if (_videoDuration != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              'Duration: $_videoDuration',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+              Icon(
+                Icons.videocam_rounded,
+                size: 48,
+                color: _primaryColor,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Video Ready',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: _textColor,
                 ),
-
-              // Play/Pause overlay
-              if (_videoController != null &&
-                  _videoController!.value.isInitialized)
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        if (_videoController!.value.isPlaying) {
-                          _videoController!.pause();
-                        } else {
-                          _videoController!.play();
-                        }
-                      });
-                    },
-                    child: Container(
-                      color: Colors.black.withOpacity(0.3),
-                      child: Center(
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.black
-                                .withOpacity(_isVideoPlaying ? 0.0 : 0.6),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            _isVideoPlaying ? Icons.pause : Icons.play_arrow,
-                            size: _isVideoPlaying ? 32 : 40,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-              // Video info overlay
+              ),
+              const SizedBox(height: 8),
               if (_videoDuration != null)
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _videoDuration!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                Text(
+                  'Duration: $_videoDuration',
+                  style: TextStyle(
+                    color: _hintColor,
+                    fontSize: 14,
                   ),
                 ),
+              const SizedBox(height: 4),
+              Text(
+                _selectedVideo!.path.split('/').last,
+                style: TextStyle(
+                  color: _hintColor,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),

@@ -689,7 +689,7 @@ class _ContentManagementState extends State<ContentManagement> {
           crossAxisCount: 2,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: 0.78, // Fixed overflow by increasing aspect ratio
+          childAspectRatio: 0.75, // Adjusted to prevent gaps
         ),
         itemCount: displayVideos.length,
         itemBuilder: (context, index) {
@@ -763,142 +763,117 @@ class _ContentManagementState extends State<ContentManagement> {
         color: _getCardColor(),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _getBorderColor()),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Thumbnail - Fixed height
+          // Thumbnail
           SizedBox(
-            height: 100,
+            height: 110,
             child: _buildVideoThumbnail(video, thumbnailUrl, hasVideo),
           ),
 
-          // Content - Flexible but constrained with better spacing to prevent overflow
+          // Content area
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Title and icon
-                  Column(
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: _getLightColor(video['color'] as Color),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              video['icon'] as IconData,
-                              color: video['color'] as Color,
-                              size: 12,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              video['title'] as String,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _getTextColor(),
-                                height: 1.2,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      // Duration
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                        width: 24,
+                        height: 24,
                         decoration: BoxDecoration(
-                          color: _getBackgroundColor(),
-                          borderRadius: BorderRadius.circular(4),
+                          color: _getLightColor(video['color'] as Color),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.schedule_rounded,
-                                size: 10, color: _getTextColorTertiary()),
-                            const SizedBox(width: 4),
-                            Text(
-                              video['duration_text'] as String? ?? '0s',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: _getTextColorTertiary(),
-                              ),
-                            ),
-                          ],
+                        child: Icon(
+                          video['icon'] as IconData,
+                          color: video['color'] as Color,
+                          size: 13,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          video['title'] as String,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _getTextColor(),
+                            height: 1.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+
+                  // Duration
+                  Row(
+                    children: [
+                      Icon(Icons.schedule_rounded,
+                          size: 10, color: _getTextColorTertiary()),
+                      const SizedBox(width: 3),
+                      Text(
+                        video['duration_text'] as String? ?? '0s',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: _getTextColorTertiary(),
                         ),
                       ),
                     ],
                   ),
 
-                  // Stats - Fixed height with proper spacing to prevent overflow
-                  SizedBox(
-                    height: 24, // Reduced to prevent overflow
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.remove_red_eye_rounded,
-                                size: 10, color: _getTextColorTertiary()),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                '${video['views']} views',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: _getTextColorTertiary(),
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
+                  const Spacer(),
+
+                  // Stats
+                  Row(
+                    children: [
+                      Icon(Icons.remove_red_eye_rounded,
+                          size: 10, color: _getTextColorTertiary()),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${video['views']}',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: _getTextColorTertiary(),
                         ),
-                        Row(
-                          children: [
-                            Icon(Icons.people_rounded,
-                                size: 10, color: _getTextColorTertiary()),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                '${video['students']} students',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: _getTextColorTertiary(),
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.people_rounded,
+                          size: 10, color: _getTextColorTertiary()),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${video['students']}',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: _getTextColorTertiary(),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ),
 
-          // Actions - Fixed height with proper constraints to prevent overflow
+          // Actions
           Container(
-            height: 32, // Reduced to prevent overflow
+            height: 36,
             decoration: BoxDecoration(
               border: Border(
                 top: BorderSide(color: _getBorderColor()),
@@ -907,88 +882,121 @@ class _ContentManagementState extends State<ContentManagement> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextButton(
-                    onPressed: () => _playVideo(video),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      minimumSize: Size.zero,
+                  child: InkWell(
+                    onTap: () => _playVideo(video),
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(11),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.play_arrow_rounded,
-                            size: 12, color: _getPrimaryColor()),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Play',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: _getPrimaryColor(),
+                    child: Container(
+                      height: 36,
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_arrow_rounded,
+                              size: 14, color: _getPrimaryColor()),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Play',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: _getPrimaryColor(),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                Container(
-                  width: 1,
-                  height: 16,
-                  color: _getBorderColor(),
-                ),
+                Container(width: 1, height: 20, color: _getBorderColor()),
                 Expanded(
-                  child: TextButton(
-                    onPressed: () => _editContent(video), // Now working
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      minimumSize: Size.zero,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.edit_rounded,
-                            size: 12, color: _getPrimaryColor()),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Edit',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: _getPrimaryColor(),
+                  child: InkWell(
+                    onTap: () => _editContent(video),
+                    child: Container(
+                      height: 36,
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_rounded,
+                              size: 14, color: _getPrimaryColor()),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Edit',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: _getPrimaryColor(),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                Container(
-                  width: 1,
-                  height: 16,
-                  color: _getBorderColor(),
-                ),
+                Container(width: 1, height: 20, color: _getBorderColor()),
                 Expanded(
-                  child: TextButton(
-                    onPressed: () => _viewAnalytics(video),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      minimumSize: Size.zero,
+                  child: InkWell(
+                    onTap: () => _viewAnalytics(video),
+                    borderRadius: const BorderRadius.only(
+                      bottomRight: Radius.circular(11),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.analytics_rounded,
-                            size: 12, color: _getPrimaryColor()),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Stats',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: _getPrimaryColor(),
+                    child: Container(
+                      height: 36,
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.bar_chart_rounded,
+                              size: 14, color: _getPrimaryColor()),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Stats',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: _getPrimaryColor(),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        minimumSize: Size.zero,
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 14, color: _getPrimaryColor()),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w500,
+              color: _getPrimaryColor(),
             ),
           ),
         ],
