@@ -31,22 +31,30 @@ class _LessonCreationState extends State<LessonCreation> {
   DateTime? _scheduledDate;
   String? _videoDuration;
 
-  // REMOVED: Video player controller for preview
   bool _isVideoInitializing = false;
-
   List<String> _availableSubjects = [];
 
-  // Colors
-  final Color _primaryColor = const Color(0xFF4361EE);
-  final Color _secondaryColor = const Color(0xFF3A0CA3);
-  final Color _accentColor = const Color(0xFF4CC9F0);
-  final Color _successColor = const Color(0xFF4ADE80);
+  // Modern Color Scheme
+  final Color _primaryColor = const Color(0xFF6366F1);
+  final Color _primaryDark = const Color(0xFF4F46E5);
+  final Color _secondaryColor = const Color(0xFFEC4899);
+  final Color _accentColor = const Color(0xFF06B6D4);
+  final Color _successColor = const Color(0xFF10B981);
   final Color _warningColor = const Color(0xFFF59E0B);
   final Color _errorColor = const Color(0xFFEF4444);
   final Color _backgroundColor = const Color(0xFFF8FAFC);
-  final Color _cardColor = Colors.white;
-  final Color _textColor = const Color(0xFF1E293B);
-  final Color _hintColor = const Color(0xFF64748B);
+  final Color _surfaceColor = Colors.white;
+  final Color _textPrimary = const Color(0xFF1E293B);
+  final Color _textSecondary = const Color(0xFF64748B);
+  final Color _textTertiary = const Color(0xFF94A3B8);
+  final Color _borderColor = const Color(0xFFE2E8F0);
+
+  // Gradients
+  final Gradient _primaryGradient = const LinearGradient(
+    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
 
   @override
   void initState() {
@@ -93,7 +101,6 @@ class _LessonCreationState extends State<LessonCreation> {
 
   Future<void> _recordVideo() async {
     try {
-      // Check camera availability first
       final isCameraAvailable = await _lessonService.checkCameraAvailability();
       if (!isCameraAvailable) {
         _showErrorDialog(
@@ -141,7 +148,6 @@ class _LessonCreationState extends State<LessonCreation> {
     }
   }
 
-  // FIXED: Handle video selection WITHOUT VideoPlayerController
   Future<void> _handleVideoSelected(File videoFile) async {
     try {
       _lessonService.validateVideoFile(videoFile);
@@ -152,7 +158,6 @@ class _LessonCreationState extends State<LessonCreation> {
         _isVideoInitializing = true;
       });
 
-      // Get duration WITHOUT video player - uses safe method
       final duration = await _lessonService.getVideoDuration(videoFile);
       setState(() {
         _videoDuration =
@@ -166,33 +171,72 @@ class _LessonCreationState extends State<LessonCreation> {
         _isVideoInitializing = false;
       });
       debugPrint('Video handling completed without preview: $e');
-      // Don't show error to user - everything still works!
       _showSuccessSnackbar('Video selected successfully!');
     }
   }
 
   Future<void> _replaceVideo() async {
     try {
-      // Show options to pick from gallery or record new video
-      final source = await showDialog<ImageSource>(
+      final source = await showModalBottomSheet<ImageSource>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Replace Video'),
-          content: const Text('Choose how you want to replace the video:'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, ImageSource.gallery),
-              child: const Text('Choose from Gallery'),
+        backgroundColor: Colors.transparent,
+        builder: (context) => Container(
+          decoration: BoxDecoration(
+            color: _surfaceColor,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(24),
+              topRight: Radius.circular(24),
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, ImageSource.camera),
-              child: const Text('Record New Video'),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Replace Video',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: _textPrimary,
+                    ),
+                  ),
+                ),
+                _buildActionTile(
+                  icon: Icons.video_library_rounded,
+                  title: 'Choose from Gallery',
+                  subtitle: 'Select from your device',
+                  color: _primaryColor,
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+                _buildActionTile(
+                  icon: Icons.videocam_rounded,
+                  title: 'Record New Video',
+                  subtitle: 'Record with camera',
+                  color: _secondaryColor,
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _textSecondary,
+                      side: BorderSide(color: _borderColor),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
+          ),
         ),
       );
 
@@ -212,6 +256,39 @@ class _LessonCreationState extends State<LessonCreation> {
     } catch (e) {
       _showErrorDialog('Replace Video Error', e.toString());
     }
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 24),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          color: _textPrimary,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(color: _textSecondary),
+      ),
+      trailing:
+          Icon(Icons.arrow_forward_ios_rounded, color: _textTertiary, size: 16),
+      onTap: onTap,
+    );
   }
 
   Future<void> _editVideo() async {
@@ -256,17 +333,15 @@ class _LessonCreationState extends State<LessonCreation> {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
-      // Step 1: Quick validation (5%)
       setState(() => _uploadProgress = 0.05);
 
-      // Step 2: Get duration and create lesson in parallel (25%)
       final results = await Future.wait([
         _lessonService.getVideoDuration(_selectedVideo!),
         _lessonService.createLesson(
           title: _titleController.text.trim(),
           subject: _selectedSubject,
           grade: _selectedGrade,
-          durationSeconds: 0, // Will be updated after duration is known
+          durationSeconds: 0,
           educatorId: user.id,
           description: _descriptionController.text.trim().isEmpty
               ? null
@@ -279,15 +354,13 @@ class _LessonCreationState extends State<LessonCreation> {
       final duration = results[0] as Duration;
       final lessonId = results[1] as String;
 
-      // Update lesson with actual duration
       await _lessonService.updateLessonMedia(
         lessonId: lessonId,
-        videoUrl: '', // Will be updated after upload
+        videoUrl: '',
       );
 
       setState(() => _uploadProgress = 0.30);
 
-      // Step 3: Upload video and generate thumbnail in parallel (65%)
       final uploadResults = await Future.wait([
         _lessonService.uploadVideo(
           lessonId: lessonId,
@@ -313,7 +386,6 @@ class _LessonCreationState extends State<LessonCreation> {
 
       setState(() => _uploadProgress = 0.95);
 
-      // Step 4: Final update with URLs (5%)
       await _lessonService.updateLessonMedia(
         lessonId: lessonId,
         videoUrl: videoUrl,
@@ -322,10 +394,8 @@ class _LessonCreationState extends State<LessonCreation> {
 
       setState(() => _uploadProgress = 1.0);
 
-      // Show success message
       await _showSuccessDialog();
 
-      // Navigate back
       if (mounted) {
         Navigator.pop(context);
       }
@@ -346,45 +416,69 @@ class _LessonCreationState extends State<LessonCreation> {
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: _cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: _successColor, size: 28),
-            const SizedBox(width: 12),
-            Text(
-              'Success!',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: _textColor,
+      builder: (context) => Dialog(
+        backgroundColor: _surfaceColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: _primaryGradient,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check, color: Colors.white, size: 40),
               ),
-            ),
-          ],
-        ),
-        content: Text(
-          _scheduleForLater
-              ? 'Your lesson "${_titleController.text}" has been scheduled successfully!'
-              : 'Your lesson "${_titleController.text}" has been published successfully!',
-          style: TextStyle(
-            fontSize: 16,
-            color: _textColor,
+              const SizedBox(height: 24),
+              Text(
+                'Success!',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  color: _textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _scheduleForLater
+                    ? 'Your lesson "${_titleController.text}" has been scheduled successfully!'
+                    : 'Your lesson "${_titleController.text}" has been published successfully!',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: _textSecondary,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Continue',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(
-              foregroundColor: _primaryColor,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-            child: const Text(
-              'OK',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -392,43 +486,80 @@ class _LessonCreationState extends State<LessonCreation> {
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: _cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.error_outline, color: _errorColor, size: 28),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: _textColor,
+      builder: (context) => Dialog(
+        backgroundColor: _surfaceColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: _errorColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.error_outline_rounded,
+                    color: _errorColor, size: 32),
               ),
-            ),
-          ],
-        ),
-        content: Text(
-          message,
-          style: TextStyle(
-            fontSize: 16,
-            color: _textColor,
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: _textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: _textSecondary,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _textSecondary,
+                        side: BorderSide(color: _borderColor),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Try Again'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(
-              foregroundColor: _primaryColor,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-            child: const Text(
-              'OK',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -437,20 +568,24 @@ class _LessonCreationState extends State<LessonCreation> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: _successColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         content: Row(
           children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
             const SizedBox(width: 8),
-            Text(
-              message,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w500),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
           ],
         ),
         duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -471,10 +606,10 @@ class _LessonCreationState extends State<LessonCreation> {
             colorScheme: ColorScheme.light(
               primary: _primaryColor,
               onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _textColor,
+              surface: _surfaceColor,
+              onSurface: _textPrimary,
             ),
-            dialogBackgroundColor: _cardColor,
+            dialogBackgroundColor: _surfaceColor,
           ),
           child: child!,
         );
@@ -496,10 +631,10 @@ class _LessonCreationState extends State<LessonCreation> {
               colorScheme: ColorScheme.light(
                 primary: _primaryColor,
                 onPrimary: Colors.white,
-                surface: _cardColor,
-                onSurface: _textColor,
+                surface: _surfaceColor,
+                onSurface: _textPrimary,
               ),
-              dialogBackgroundColor: _cardColor,
+              dialogBackgroundColor: _surfaceColor,
             ),
             child: child!,
           );
@@ -515,7 +650,6 @@ class _LessonCreationState extends State<LessonCreation> {
           time.minute,
         );
 
-        // Validate that scheduled time is at least 5 minutes from now
         if (scheduledDateTime.isBefore(now.add(const Duration(minutes: 5)))) {
           _showErrorDialog(
             'Invalid Schedule Time',
@@ -569,6 +703,11 @@ class _LessonCreationState extends State<LessonCreation> {
         elevation: 0,
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            bottom: Radius.circular(20),
+          ),
+        ),
       ),
       body: _isUploading ? _buildUploadProgress() : _buildLessonForm(),
     );
@@ -577,7 +716,7 @@ class _LessonCreationState extends State<LessonCreation> {
   Widget _buildUploadProgress() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -585,21 +724,31 @@ class _LessonCreationState extends State<LessonCreation> {
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 100,
-                  height: 100,
+                  width: 120,
+                  height: 120,
                   child: CircularProgressIndicator(
                     value: _uploadProgress,
                     strokeWidth: 8,
-                    backgroundColor: _hintColor.withOpacity(0.2),
+                    backgroundColor: _textTertiary.withOpacity(0.2),
                     valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
                   ),
                 ),
-                Text(
-                  '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: _primaryColor,
+                Container(
+                  width: 90,
+                  height: 90,
+                  decoration: BoxDecoration(
+                    gradient: _primaryGradient,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -610,34 +759,34 @@ class _LessonCreationState extends State<LessonCreation> {
                   ? 'Scheduling Your Lesson...'
                   : 'Publishing Your Lesson...',
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 22,
                 fontWeight: FontWeight.w700,
-                color: _textColor,
+                color: _textPrimary,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
             Text(
               _uploadProgress < 0.3
-                  ? 'Preparing lesson...'
+                  ? 'Preparing lesson content...'
                   : _uploadProgress < 0.7
-                      ? 'Uploading video...'
+                      ? 'Uploading video content...'
                       : _uploadProgress < 0.9
-                          ? 'Generating thumbnail...'
+                          ? 'Generating preview...'
                           : 'Finalizing...',
               style: TextStyle(
                 fontSize: 16,
-                color: _hintColor,
+                color: _textSecondary,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 24),
             LinearProgressIndicator(
               value: _uploadProgress,
-              backgroundColor: _hintColor.withOpacity(0.2),
+              backgroundColor: _textTertiary.withOpacity(0.2),
               valueColor: AlwaysStoppedAnimation<Color>(_primaryColor),
-              minHeight: 6,
-              borderRadius: BorderRadius.circular(3),
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(4),
             ),
           ],
         ),
@@ -646,32 +795,29 @@ class _LessonCreationState extends State<LessonCreation> {
   }
 
   Widget _buildLessonForm() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 100),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Video Selection Section
-              _buildVideoSelectionSection(),
-              const SizedBox(height: 24),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Video Selection Section
+            _buildVideoSelectionSection(),
+            const SizedBox(height: 24),
 
-              // Lesson Details Section
-              _buildLessonDetailsSection(),
-              const SizedBox(height: 24),
+            // Lesson Details Section
+            _buildLessonDetailsSection(),
+            const SizedBox(height: 24),
 
-              // Schedule Options
-              _buildScheduleSection(),
-              const SizedBox(height: 32),
+            // Schedule Options
+            _buildScheduleSection(),
+            const SizedBox(height: 32),
 
-              // Create Button
-              _buildCreateButton(),
-              const SizedBox(height: 20),
-            ],
-          ),
+            // Create Button
+            _buildCreateButton(),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
     );
@@ -681,8 +827,8 @@ class _LessonCreationState extends State<LessonCreation> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
+        color: _surfaceColor,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -692,21 +838,21 @@ class _LessonCreationState extends State<LessonCreation> {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.1),
+                    gradient: _primaryGradient,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.videocam_rounded,
-                    color: _primaryColor,
+                    color: Colors.white,
                     size: 24,
                   ),
                 ),
@@ -716,12 +862,12 @@ class _LessonCreationState extends State<LessonCreation> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: _textColor,
+                    color: _textPrimary,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             if (_selectedVideo != null)
               _buildVideoPreview()
             else
@@ -737,50 +883,66 @@ class _LessonCreationState extends State<LessonCreation> {
       children: [
         Container(
           width: double.infinity,
-          height: 140,
+          height: 160,
           decoration: BoxDecoration(
             color: _backgroundColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: _hintColor.withOpacity(0.3),
+              color: _borderColor,
               width: 2,
             ),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.video_library_rounded,
-                size: 48,
-                color: _hintColor,
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: _primaryColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.video_library_rounded,
+                  size: 32,
+                  color: _primaryColor,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Text(
                 'Add your lesson video',
                 style: TextStyle(
                   fontSize: 16,
-                  color: _hintColor,
-                  fontWeight: FontWeight.w500,
+                  color: _textPrimary,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 'MP4, MOV, AVI, MKV, or WEBM • Max 500MB',
                 style: TextStyle(
-                  fontSize: 12,
-                  color: _hintColor.withOpacity(0.7),
+                  fontSize: 13,
+                  color: _textSecondary,
                 ),
                 textAlign: TextAlign.center,
               ),
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
-              child: ElevatedButton(
+              child: ElevatedButton.icon(
                 onPressed: _pickVideo,
+                icon: const Icon(Icons.video_library_rounded, size: 20),
+                label: const Text(
+                  'Choose Video',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryColor,
                   foregroundColor: Colors.white,
@@ -789,20 +951,6 @@ class _LessonCreationState extends State<LessonCreation> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   elevation: 2,
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.video_library_rounded, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Choose Video',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
                 ),
               ),
             ),
@@ -816,55 +964,56 @@ class _LessonCreationState extends State<LessonCreation> {
 
   Widget _buildRecordButton() {
     return Expanded(
-      child: OutlinedButton(
+      child: OutlinedButton.icon(
         onPressed: _isVideoInitializing ? null : _recordVideo,
+        icon: _isVideoInitializing
+            ? SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: _primaryColor,
+                ),
+              )
+            : Icon(Icons.videocam_rounded, size: 20, color: _primaryColor),
+        label: Text(
+          _isVideoInitializing ? 'Recording...' : 'Record',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: _isVideoInitializing ? _textTertiary : _primaryColor,
+          ),
+        ),
         style: OutlinedButton.styleFrom(
           foregroundColor: _primaryColor,
           side: BorderSide(
-              color: _isVideoInitializing ? _hintColor : _primaryColor,
+              color: _isVideoInitializing ? _borderColor : _primaryColor,
               width: 2),
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
         ),
-        child: _isVideoInitializing
-            ? SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: _primaryColor,
-                ),
-              )
-            : const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.videocam_rounded, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Record',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
       ),
     );
   }
 
-  // FIXED: Video preview WITHOUT VideoPlayerController
   Widget _buildVideoPreview() {
     return Column(
       children: [
         Container(
           width: double.infinity,
-          height: 180,
+          height: 200,
           decoration: BoxDecoration(
-            color: _backgroundColor,
-            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              colors: [
+                _primaryColor.withOpacity(0.1),
+                _accentColor.withOpacity(0.1)
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: _primaryColor.withOpacity(0.3),
               width: 2,
@@ -873,35 +1022,52 @@ class _LessonCreationState extends State<LessonCreation> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.videocam_rounded,
-                size: 48,
-                color: _primaryColor,
+              Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  color: _primaryColor.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.videocam_rounded,
+                  size: 36,
+                  color: _primaryColor,
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Text(
                 'Video Ready',
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: _textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: _textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
               if (_videoDuration != null)
-                Text(
-                  'Duration: $_videoDuration',
-                  style: TextStyle(
-                    color: _hintColor,
-                    fontSize: 14,
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Duration: $_videoDuration',
+                    style: TextStyle(
+                      color: _primaryColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Text(
                 _selectedVideo!.path.split('/').last,
                 style: TextStyle(
-                  color: _hintColor,
-                  fontSize: 12,
+                  color: _textSecondary,
+                  fontSize: 13,
                 ),
                 textAlign: TextAlign.center,
                 maxLines: 2,
@@ -910,7 +1076,7 @@ class _LessonCreationState extends State<LessonCreation> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
@@ -919,11 +1085,11 @@ class _LessonCreationState extends State<LessonCreation> {
                 icon: Icon(Icons.swap_horiz_rounded,
                     color: _primaryColor, size: 20),
                 label: Text(
-                  'Replace Video',
+                  'Replace',
                   style: TextStyle(
                     color: _primaryColor,
                     fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                    fontSize: 15,
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
@@ -941,10 +1107,10 @@ class _LessonCreationState extends State<LessonCreation> {
                 onPressed: _editVideo,
                 icon: const Icon(Icons.edit_rounded, size: 20),
                 label: const Text(
-                  'Edit Video',
+                  'Edit',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                    fontSize: 15,
                   ),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -968,8 +1134,8 @@ class _LessonCreationState extends State<LessonCreation> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
+        color: _surfaceColor,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -979,21 +1145,25 @@ class _LessonCreationState extends State<LessonCreation> {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _accentColor.withOpacity(0.1),
+                    gradient: LinearGradient(
+                      colors: [_accentColor, _primaryColor],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.info_rounded,
-                    color: _accentColor,
+                    color: Colors.white,
                     size: 24,
                   ),
                 ),
@@ -1003,20 +1173,20 @@ class _LessonCreationState extends State<LessonCreation> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: _textColor,
+                    color: _textPrimary,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
             // Title
             Text(
               'Lesson Title *',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: _textColor,
+                color: _textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -1024,7 +1194,7 @@ class _LessonCreationState extends State<LessonCreation> {
               controller: _titleController,
               decoration: InputDecoration(
                 hintText: 'Enter a descriptive title for your lesson',
-                hintStyle: TextStyle(color: _hintColor),
+                hintStyle: TextStyle(color: _textTertiary),
                 filled: true,
                 fillColor: _backgroundColor,
                 border: OutlineInputBorder(
@@ -1042,7 +1212,7 @@ class _LessonCreationState extends State<LessonCreation> {
               ),
               style: TextStyle(
                 fontSize: 16,
-                color: _textColor,
+                color: _textPrimary,
                 fontWeight: FontWeight.w500,
               ),
               validator: (value) {
@@ -1055,15 +1225,15 @@ class _LessonCreationState extends State<LessonCreation> {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
             // Description
             Text(
               'Description',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: _textColor,
+                color: _textPrimary,
               ),
             ),
             const SizedBox(height: 8),
@@ -1071,7 +1241,7 @@ class _LessonCreationState extends State<LessonCreation> {
               controller: _descriptionController,
               decoration: InputDecoration(
                 hintText: 'Add a description for your lesson (optional)',
-                hintStyle: TextStyle(color: _hintColor),
+                hintStyle: TextStyle(color: _textTertiary),
                 filled: true,
                 fillColor: _backgroundColor,
                 border: OutlineInputBorder(
@@ -1089,139 +1259,135 @@ class _LessonCreationState extends State<LessonCreation> {
               ),
               style: TextStyle(
                 fontSize: 16,
-                color: _textColor,
+                color: _textPrimary,
                 fontWeight: FontWeight.w500,
               ),
               maxLines: 4,
               textAlignVertical: TextAlignVertical.top,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
 
-            // Subject and Grade Display
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            // Subject and Grade
+            Row(
               children: [
-                // Subject Dropdown - Full width
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Subject *',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: _backgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedSubject,
-                        decoration: InputDecoration(
-                          filled: true,
-                          fillColor: _backgroundColor,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                BorderSide(color: _primaryColor, width: 2),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Subject *',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _textPrimary,
                         ),
-                        items: _availableSubjects.map((String subject) {
-                          return DropdownMenuItem<String>(
-                            value: subject,
-                            child: Text(
-                              subject,
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: _backgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: DropdownButtonFormField<String>(
+                          value: _selectedSubject,
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: _backgroundColor,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  BorderSide(color: _primaryColor, width: 2),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                          items: _availableSubjects.map((String subject) {
+                            return DropdownMenuItem<String>(
+                              value: subject,
+                              child: Text(
+                                subject,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: _textPrimary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _selectedSubject = newValue!;
+                            });
+                          },
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: _textPrimary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          dropdownColor: _surfaceColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Grade',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _backgroundColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _borderColor),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.school_rounded,
+                              color: _primaryColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              _selectedGrade,
                               style: TextStyle(
-                                fontSize: 16,
-                                color: _textColor,
+                                fontSize: 15,
+                                color: _textPrimary,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedSubject = newValue!;
-                          });
-                        },
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: _textColor,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        dropdownColor: _cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Grade Display (Non-editable) - Full width
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Grade',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _backgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: _hintColor.withOpacity(0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.school_rounded,
-                            color: _primaryColor,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            _selectedGrade,
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: _textColor,
-                              fontWeight: FontWeight.w500,
+                            const Spacer(),
+                            Icon(
+                              Icons.lock_outline,
+                              color: _textTertiary,
+                              size: 16,
                             ),
-                          ),
-                          const Spacer(),
-                          Icon(
-                            Icons.lock_outline,
-                            color: _hintColor,
-                            size: 16,
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1230,7 +1396,7 @@ class _LessonCreationState extends State<LessonCreation> {
               'Grade is automatically assigned based on your educator profile',
               style: TextStyle(
                 fontSize: 12,
-                color: _hintColor,
+                color: _textTertiary,
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -1244,8 +1410,8 @@ class _LessonCreationState extends State<LessonCreation> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(16),
+        color: _surfaceColor,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -1255,21 +1421,25 @@ class _LessonCreationState extends State<LessonCreation> {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _warningColor.withOpacity(0.1),
+                    gradient: LinearGradient(
+                      colors: [_warningColor, _secondaryColor],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.schedule_rounded,
-                    color: _warningColor,
+                    color: Colors.white,
                     size: 24,
                   ),
                 ),
@@ -1279,187 +1449,50 @@ class _LessonCreationState extends State<LessonCreation> {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: _textColor,
+                    color: _textPrimary,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
             // Publish Now Option
-            GestureDetector(
+            _buildPublishOption(
+              isSelected: !_scheduleForLater,
+              icon: Icons.rocket_launch_rounded,
+              title: 'Publish Now',
+              subtitle: 'Make lesson available immediately',
               onTap: () {
                 setState(() {
                   _scheduleForLater = false;
                   _scheduledDate = null;
                 });
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _backgroundColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: !_scheduleForLater
-                        ? _primaryColor
-                        : _hintColor.withOpacity(0.3),
-                    width: !_scheduleForLater ? 2 : 1,
-                  ),
-                  boxShadow: !_scheduleForLater
-                      ? [
-                          BoxShadow(
-                            color: _primaryColor.withOpacity(0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : [],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color:
-                              !_scheduleForLater ? _primaryColor : _hintColor,
-                          width: 2,
-                        ),
-                        color: !_scheduleForLater
-                            ? _primaryColor
-                            : Colors.transparent,
-                      ),
-                      child: !_scheduleForLater
-                          ? Icon(Icons.check, size: 16, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Publish Now',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: _textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Make lesson available immediately',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: _hintColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      Icons.rocket_launch_rounded,
-                      color: !_scheduleForLater ? _primaryColor : _hintColor,
-                    ),
-                  ],
-                ),
-              ),
             ),
             const SizedBox(height: 16),
 
             // Schedule for Later Option
-            GestureDetector(
+            _buildPublishOption(
+              isSelected: _scheduleForLater,
+              icon: Icons.calendar_today_rounded,
+              title: 'Schedule for Later',
+              subtitle: 'Publish at a specific date and time',
               onTap: () {
                 setState(() {
                   _scheduleForLater = true;
                 });
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _backgroundColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _scheduleForLater
-                        ? _primaryColor
-                        : _hintColor.withOpacity(0.3),
-                    width: _scheduleForLater ? 2 : 1,
-                  ),
-                  boxShadow: _scheduleForLater
-                      ? [
-                          BoxShadow(
-                            color: _primaryColor.withOpacity(0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : [],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _scheduleForLater ? _primaryColor : _hintColor,
-                          width: 2,
-                        ),
-                        color: _scheduleForLater
-                            ? _primaryColor
-                            : Colors.transparent,
-                      ),
-                      child: _scheduleForLater
-                          ? Icon(Icons.check, size: 16, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Schedule for Later',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: _textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Publish at a specific date and time',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: _hintColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      Icons.calendar_today_rounded,
-                      color: _scheduleForLater ? _primaryColor : _hintColor,
-                    ),
-                  ],
-                ),
-              ),
             ),
 
             // Date Picker
             if (_scheduleForLater) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               Text(
                 'Schedule Time',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: _textColor,
+                  color: _textPrimary,
                 ),
               ),
               const SizedBox(height: 12),
@@ -1469,7 +1502,7 @@ class _LessonCreationState extends State<LessonCreation> {
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: _backgroundColor,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: _primaryColor.withOpacity(0.3),
                       width: 2,
@@ -1499,7 +1532,7 @@ class _LessonCreationState extends State<LessonCreation> {
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: _textColor,
+                                color: _textPrimary,
                               ),
                             ),
                             const SizedBox(height: 6),
@@ -1510,7 +1543,7 @@ class _LessonCreationState extends State<LessonCreation> {
                               style: TextStyle(
                                 fontSize: 15,
                                 color: _scheduledDate == null
-                                    ? _hintColor
+                                    ? _textTertiary
                                     : _primaryColor,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -1520,7 +1553,7 @@ class _LessonCreationState extends State<LessonCreation> {
                       ),
                       Icon(
                         Icons.arrow_forward_ios_rounded,
-                        color: _hintColor,
+                        color: _textTertiary,
                         size: 18,
                       ),
                     ],
@@ -1529,21 +1562,21 @@ class _LessonCreationState extends State<LessonCreation> {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: _warningColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.info_outline_rounded,
-                        color: _warningColor, size: 16),
-                    const SizedBox(width: 8),
+                        color: _warningColor, size: 20),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Schedule time must be at least 5 minutes from now',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 13,
                           color: _warningColor,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1553,6 +1586,98 @@ class _LessonCreationState extends State<LessonCreation> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPublishOption({
+    required bool isSelected,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color:
+              isSelected ? _primaryColor.withOpacity(0.05) : _backgroundColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? _primaryColor : _borderColor,
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: _primaryColor.withOpacity(0.1),
+                    blurRadius: 15,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : [],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color:
+                    isSelected ? _primaryColor : _textTertiary.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: isSelected ? Colors.white : _textTertiary,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? _primaryColor : _textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isSelected ? _primaryColor : _textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? _primaryColor : _textTertiary,
+                  width: 2,
+                ),
+                color: isSelected ? _primaryColor : Colors.transparent,
+              ),
+              child: isSelected
+                  ? Icon(Icons.check, size: 16, color: Colors.white)
+                  : null,
+            ),
           ],
         ),
       ),
@@ -1585,13 +1710,13 @@ class _LessonCreationState extends State<LessonCreation> {
                 _scheduleForLater
                     ? Icons.schedule_rounded
                     : Icons.rocket_launch_rounded,
-                size: 20,
+                size: 24,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Text(
                 _scheduleForLater ? 'Schedule Lesson' : 'Publish Lesson Now',
                 style: const TextStyle(
-                  fontSize: 16,
+                  fontSize: 17,
                   fontWeight: FontWeight.w700,
                 ),
               ),

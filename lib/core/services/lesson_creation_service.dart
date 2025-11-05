@@ -667,7 +667,6 @@ class LessonCreationService with WidgetsBindingObserver {
   }
 
   // Get educator's grade
-  // Get educator's grade
   Future<String> getEducatorGrade(String educatorId) async {
     try {
       final response = await _client
