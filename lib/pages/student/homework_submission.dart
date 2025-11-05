@@ -1,4 +1,6 @@
 // lib/pages/student/homework_submission.dart
+// ignore_for_file: unused_field, use_build_context_synchronously, prefer_const_constructors
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:signsync_academy/core/services/homework_service.dart';

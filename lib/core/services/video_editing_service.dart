@@ -1,4 +1,6 @@
 // lib/core/services/video_editing_service.dart
+// ignore_for_file: unused_element
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';

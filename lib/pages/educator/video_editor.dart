@@ -1,4 +1,6 @@
 // lib/pages/educator/video_editor.dart
+// ignore_for_file: unused_local_variable, use_build_context_synchronously, prefer_const_constructors, curly_braces_in_flow_control_structures, unnecessary_brace_in_string_interps, unused_import
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';

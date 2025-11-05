@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use, avoid_print, use_build_context_synchronously, prefer_const_constructors
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';

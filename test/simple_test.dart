@@ -1,0 +1,11 @@
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('basic math test', () {
+    expect(1 + 1, 2);
+  });
+  
+  test('string test', () {
+    expect('hello'.toUpperCase(), 'HELLO');
+  });
+}

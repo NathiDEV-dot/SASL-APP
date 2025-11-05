@@ -1,3 +1,5 @@
+// ignore_for_file: unnecessary_cast, unnecessary_null_comparison, unused_element
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:developer' as developer;
 

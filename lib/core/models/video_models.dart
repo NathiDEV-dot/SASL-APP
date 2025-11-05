@@ -1,4 +1,6 @@
 // lib/core/models/video_models.dart
+// ignore_for_file: unused_import, unreachable_switch_default
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 

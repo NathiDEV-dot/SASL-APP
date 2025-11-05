@@ -1,4 +1,6 @@
 // lib/core/state/video_editing_state.dart
+// ignore_for_file: annotate_overrides, must_call_super
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';

@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, unused_field
+// ignore_for_file: deprecated_member_use, unused_field, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';

@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, unused_field, unused_import
+// ignore_for_file: deprecated_member_use, unused_field, unused_import, unused_local_variable, prefer_const_constructors, use_build_context_synchronously, unnecessary_cast
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
