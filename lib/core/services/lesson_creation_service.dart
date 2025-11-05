@@ -10,15 +10,23 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:camera/camera.dart' as camera_package;
+import 'package:video_player/video_player.dart';
 
 class LessonCreationService with WidgetsBindingObserver {
   final SupabaseClient _client = Supabase.instance.client;
-  final ImagePicker _imagePicker = ImagePicker();
+  final ImagePicker _picker = ImagePicker();
 
-  // Camera state management
-  bool _isCameraInUse = false;
+  // Camera instance management - EXACTLY LIKE VideoUploadService
+  camera_package.CameraController? _cameraController;
+  bool _isCameraInitialized = false;
+  bool _isRecording = false;
   bool _isAppInBackground = false;
-  Completer<File?>? _recordingCompleter;
+  bool _isFrontCamera = false;
+  List<camera_package.CameraDescription> _cameras = [];
+  double _currentZoomLevel = 1.0;
+  Timer? _recordingTimer;
+  Duration _recordingDuration = Duration.zero;
 
   LessonCreationService() {
     WidgetsBinding.instance.addObserver(this);
@@ -39,195 +47,281 @@ class LessonCreationService with WidgetsBindingObserver {
         _cleanupAllResources();
         break;
       case AppLifecycleState.hidden:
-        // Handle this case
         break;
     }
   }
 
   void _cancelRecordingIfInProgress() {
-    if (_isCameraInUse &&
-        _recordingCompleter != null &&
-        !_recordingCompleter!.isCompleted) {
-      _recordingCompleter!.completeError(
-          Exception('Recording interrupted - app went to background'));
-      _recordingCompleter = null;
+    if (_isRecording) {
+      _stopRecordingInternal();
     }
-    _isCameraInUse = false;
   }
 
   void _cleanupAllResources() {
-    _isCameraInUse = false;
-    _recordingCompleter = null;
+    _disposeCamera();
+    _stopRecordingTimer();
   }
 
-  // Check and request camera permissions
-  Future<bool> _checkCameraPermissions() async {
+  // ========== CAMERA MANAGEMENT - EXACTLY LIKE VideoUploadService ==========
+
+  Future<camera_package.CameraController?> initializeCamera() async {
     try {
-      // Check camera permission
-      var cameraStatus = await Permission.camera.status;
-      if (!cameraStatus.isGranted) {
-        cameraStatus = await Permission.camera.request();
+      await _disposeCamera();
+
+      // EXACTLY LIKE VideoUploadService - direct permission requests
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        throw Exception('Camera permission denied');
       }
 
-      // Check microphone permission for audio recording
-      var microphoneStatus = await Permission.microphone.status;
-      if (!microphoneStatus.isGranted) {
-        microphoneStatus = await Permission.microphone.request();
+      final statusMicrophone = await Permission.microphone.request();
+      if (!statusMicrophone.isGranted) {
+        throw Exception('Microphone permission denied');
       }
 
-      // Check storage permission for saving videos
-      var storageStatus = await Permission.storage.status;
-      if (!storageStatus.isGranted) {
-        storageStatus = await Permission.storage.request();
+      _cameras = await camera_package.availableCameras();
+      if (_cameras.isEmpty) {
+        throw Exception('No cameras available');
       }
 
-      return cameraStatus.isGranted &&
-          microphoneStatus.isGranted &&
-          storageStatus.isGranted;
-    } catch (e) {
-      debugPrint('Permission check error: $e');
-      return false;
-    }
-  }
-
-  // Pick video from gallery
-  Future<File?> pickVideo() async {
-    try {
-      await _cleanupCameraResources();
-
-      final XFile? pickedFile = await _imagePicker.pickVideo(
-        source: ImageSource.gallery,
+      // Start with back camera - EXACTLY LIKE VideoUploadService
+      final initialCamera = _cameras.firstWhere(
+        (camera) =>
+            camera.lensDirection == camera_package.CameraLensDirection.back,
+        orElse: () => _cameras.first,
       );
 
-      return pickedFile != null ? File(pickedFile.path) : null;
+      _cameraController = camera_package.CameraController(
+        initialCamera,
+        camera_package.ResolutionPreset.high,
+        enableAudio: true,
+        imageFormatGroup: camera_package.ImageFormatGroup.yuv420,
+      );
+
+      await _cameraController!.initialize();
+      _isCameraInitialized = true;
+      _isFrontCamera = initialCamera.lensDirection ==
+          camera_package.CameraLensDirection.front;
+      _currentZoomLevel = 1.0;
+
+      return _cameraController;
     } catch (e) {
-      await _cleanupCameraResources();
-      throw Exception('Failed to pick video: ${e.toString()}');
+      await _disposeCamera();
+      throw Exception('Failed to initialize camera: $e');
     }
   }
 
-  // Record video using camera - ENHANCED VERSION
-  Future<File?> recordVideo() async {
-    if (_isCameraInUse) {
-      throw Exception('Camera is currently in use. Please wait...');
-    }
+  Future<void> switchCamera() async {
+    if (!_isCameraInitialized || _cameras.length < 2) return;
 
-    if (_isAppInBackground) {
-      throw Exception('Cannot start recording while app is in background');
-    }
+    await _disposeCamera();
 
-    // Check permissions first
-    final hasPermissions = await _checkCameraPermissions();
-    if (!hasPermissions) {
-      throw Exception(
-          'Camera, microphone, and storage permissions are required to record videos. Please enable them in app settings.');
-    }
+    _isFrontCamera = !_isFrontCamera;
+    final newCamera = _isFrontCamera
+        ? _cameras.firstWhere(
+            (camera) =>
+                camera.lensDirection ==
+                camera_package.CameraLensDirection.front,
+            orElse: () => _cameras.first,
+          )
+        : _cameras.firstWhere(
+            (camera) =>
+                camera.lensDirection == camera_package.CameraLensDirection.back,
+            orElse: () => _cameras.first,
+          );
 
-    _isCameraInUse = true;
-    _recordingCompleter = Completer<File?>();
+    _cameraController = camera_package.CameraController(
+      newCamera,
+      camera_package.ResolutionPreset.high,
+      enableAudio: true,
+      imageFormatGroup: camera_package.ImageFormatGroup.yuv420,
+    );
+
+    await _cameraController!.initialize();
+    _isCameraInitialized = true;
+    _currentZoomLevel = 1.0;
+  }
+
+  Future<void> setZoomLevel(double zoomLevel) async {
+    if (!_isCameraInitialized) return;
+
+    // Use reasonable zoom range since camera package doesn't provide min/max
+    final minZoom = 1.0;
+    final maxZoom = 5.0;
+
+    // Clamp zoom level between min and max
+    _currentZoomLevel = zoomLevel.clamp(minZoom, maxZoom);
 
     try {
-      await _preCameraSetup();
+      await _cameraController!.setZoomLevel(_currentZoomLevel);
+    } catch (e) {
+      debugPrint('Zoom not supported: $e');
+    }
+  }
 
-      final XFile? recordedFile = await _imagePicker
-          .pickVideo(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.rear,
+  Future<void> startRecording() async {
+    try {
+      if (!_isCameraInitialized || !_cameraController!.value.isInitialized) {
+        throw Exception('Camera not initialized');
+      }
+
+      if (_cameraController!.value.isRecordingVideo) {
+        throw Exception('Already recording');
+      }
+
+      if (_isAppInBackground) {
+        throw Exception('Cannot start recording while app is in background');
+      }
+
+      await _cameraController!.startVideoRecording();
+      _isRecording = true;
+      _startRecordingTimer();
+    } catch (e) {
+      throw Exception('Failed to start recording: $e');
+    }
+  }
+
+  Future<File?> stopRecording() async {
+    if (!_isRecording) return null;
+
+    try {
+      final camera_package.XFile videoFile =
+          await _cameraController!.stopVideoRecording();
+      final file = File(videoFile.path);
+
+      _isRecording = false;
+      _stopRecordingTimer();
+
+      await Future.delayed(Duration(milliseconds: 1000));
+
+      final isValid = await _isValidVideoFile(file);
+      if (isValid) {
+        return file;
+      } else {
+        throw Exception('Recorded video file is not valid');
+      }
+    } catch (e) {
+      _isRecording = false;
+      _stopRecordingTimer();
+      throw Exception('Failed to stop recording: ${e.toString()}');
+    }
+  }
+
+  void _startRecordingTimer() {
+    _recordingDuration = Duration.zero;
+    _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      _recordingDuration += Duration(seconds: 1);
+    });
+  }
+
+  void _stopRecordingTimer() {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _recordingDuration = Duration.zero;
+  }
+
+  void _stopRecordingInternal() {
+    if (_isRecording) {
+      _cameraController?.stopVideoRecording();
+      _isRecording = false;
+      _stopRecordingTimer();
+    }
+  }
+
+  Future<void> _disposeCamera() async {
+    _stopRecordingInternal();
+
+    if (_cameraController != null) {
+      await _cameraController!.dispose();
+      _cameraController = null;
+      _isCameraInitialized = false;
+    }
+  }
+
+  Future<void> disposeCamera() async {
+    await _disposeCamera();
+  }
+
+  // ========== VIDEO MANAGEMENT ==========
+
+  Future<File?> pickVideoFromGallery() async {
+    try {
+      // EXACTLY LIKE VideoUploadService - with permission handling
+      Permission permission;
+
+      if (await Permission.photos.isRestricted) {
+        permission = Permission.storage;
+      } else {
+        permission = Permission.photos;
+      }
+
+      final status = await permission.status;
+
+      if (!status.isGranted) {
+        final permissionResult = await permission.request();
+
+        if (!permissionResult.isGranted) {
+          if (permissionResult.isPermanentlyDenied) {
+            throw Exception(
+              'Gallery access is permanently denied. '
+              'Please enable it in your device settings:\n'
+              'Settings > Apps > Lesson App > Permissions > Photos/Storage',
+            );
+          }
+          throw Exception('Gallery access permission denied');
+        }
+      }
+
+      final XFile? video = await _picker.pickVideo(
+        source: ImageSource.gallery,
         maxDuration: const Duration(minutes: 30),
-      )
-          .timeout(const Duration(seconds: 60), onTimeout: () {
-        throw Exception(
-            'Camera recording timed out. Please try recording a shorter video.');
-      });
+      );
 
-      if (recordedFile != null) {
-        // Verify the file was actually created and is accessible
-        final file = File(recordedFile.path);
-        if (await file.exists()) {
-          _recordingCompleter!.complete(file);
+      if (video != null) {
+        final file = File(video.path);
+        debugPrint('Picked video from gallery: ${video.path}');
+
+        if (await _isValidVideoFile(file)) {
           return file;
         } else {
-          throw Exception('Recorded video file was not saved properly.');
+          throw Exception('Selected file is not a valid video file');
         }
-      } else {
-        _recordingCompleter!.complete(null);
-        return null;
       }
-    } catch (e) {
-      debugPrint('Camera recording error: $e');
-      _recordingCompleter!.completeError(e);
-
-      // Provide more specific error messages
-      if (e.toString().contains('Permission') ||
-          e.toString().contains('permission')) {
-        throw Exception(
-            'Camera permission denied. Please enable camera permissions in app settings.');
-      } else if (e.toString().contains('timeout')) {
-        throw Exception(
-            'Recording took too long. Please try shorter recordings (1-2 minutes).');
-      } else if (e.toString().contains('camera') ||
-          e.toString().contains('Camera')) {
-        throw Exception(
-            'Camera is busy. Please close other camera apps and try again.');
-      } else {
-        throw Exception('Camera error: ${e.toString()}');
-      }
-    } finally {
-      await _postCameraCleanup();
-    }
-  }
-
-  // Alternative recording method with shorter timeout
-  Future<File?> recordVideoQuick() async {
-    try {
-      final XFile? recordedFile = await _imagePicker
-          .pickVideo(
-            source: ImageSource.camera,
-            preferredCameraDevice: CameraDevice.rear,
-            maxDuration: const Duration(seconds: 30), // Shorter max duration
-          )
-          .timeout(const Duration(seconds: 15)); // Shorter timeout
-
-      return recordedFile != null ? File(recordedFile.path) : null;
-    } catch (e) {
-      debugPrint('Quick recording failed: $e');
       return null;
+    } catch (e) {
+      debugPrint('Gallery pick error: $e');
+      throw Exception('Failed to pick video from gallery: $e');
     }
   }
 
-  Future<void> _preCameraSetup() async {
-    // Add delay to ensure previous camera is fully released
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Force garbage collection
-    await Future(() {});
+  // For backward compatibility
+  Future<File?> pickVideo() async {
+    return await pickVideoFromGallery();
   }
 
-  Future<void> _postCameraCleanup() async {
-    _isCameraInUse = false;
-    _recordingCompleter = null;
-    // Additional cleanup delay
-    await Future.delayed(const Duration(milliseconds: 300));
-  }
-
-  Future<void> _cleanupCameraResources() async {
-    _isCameraInUse = false;
-    await Future.delayed(const Duration(milliseconds: 300));
-  }
-
-  // Check camera availability
-  Future<bool> checkCameraAvailability() async {
+  Future<bool> _isValidVideoFile(File file) async {
     try {
-      // For web compatibility, we'll assume camera is available
-      // In a real app, you might want to use camera package to check
-      return true;
+      if (!await file.exists()) return false;
+      final fileSize = await file.length();
+      if (fileSize == 0) return false;
+
+      final path = file.path.toLowerCase();
+      final validExtensions = [
+        '.mp4',
+        '.mov',
+        '.avi',
+        '.mkv',
+        '.wmv',
+        '.flv',
+        '.webm',
+        '.3gp',
+      ];
+      return validExtensions.any((ext) => path.endsWith(ext));
     } catch (e) {
-      debugPrint('Camera availability check failed: $e');
       return false;
     }
   }
 
-  // Validate video file
   void validateVideoFile(File videoFile) {
     final fileSize = videoFile.lengthSync();
     const maxSize = 500 * 1024 * 1024;
@@ -241,41 +335,39 @@ class LessonCreationService with WidgetsBindingObserver {
       throw Exception('Unsupported video format');
     }
 
-    // Additional validation for very large files
     if (fileSize > 100 * 1024 * 1024) {
       throw Exception(
           'Video file is very large. Please compress it below 100MB for better compatibility');
     }
   }
 
-  // FIXED: Get video duration WITHOUT VideoPlayerController
+  Future<int> _getVideoDuration(File videoFile) async {
+    try {
+      final videoPlayerController = VideoPlayerController.file(videoFile);
+      await videoPlayerController.initialize();
+      final duration = videoPlayerController.value.duration;
+      await videoPlayerController.dispose();
+      return duration.inSeconds;
+    } catch (e) {
+      debugPrint('Failed to get video duration: $e');
+      return 0;
+    }
+  }
+
   Future<Duration> getVideoDuration(File videoFile) async {
     try {
-      // Method 1: Try to get duration using file metadata (safe)
-      try {
-        final fileSize = await videoFile.length();
-        if (fileSize > 0) {
-          // Smart estimation based on file size and common bitrates
-          // Higher quality = more bytes per second
-          final estimatedSeconds =
-              (fileSize / (800 * 1024)).ceil(); // 800KB per second
-          return Duration(
-              seconds: estimatedSeconds.clamp(5, 3600)); // 5 seconds to 1 hour
-        }
-      } catch (e) {
-        debugPrint('File size estimation failed: $e');
+      final fileSize = await videoFile.length();
+      if (fileSize > 0) {
+        final estimatedSeconds = (fileSize / (800 * 1024)).ceil();
+        return Duration(seconds: estimatedSeconds.clamp(5, 3600));
       }
-
-      // Method 2: Return a reasonable default
-      debugPrint('Using default video duration');
-      return const Duration(seconds: 60); // 1 minute default
+      return const Duration(seconds: 60);
     } catch (e) {
-      debugPrint('All duration methods failed, using default: $e');
+      debugPrint('Duration detection failed: $e');
       return const Duration(seconds: 60);
     }
   }
 
-  // Generate video thumbnail for preview
   Future<Uint8List?> generateVideoThumbnail(File videoFile) async {
     try {
       final uint8list = await VideoThumbnail.thumbnailData(
@@ -292,15 +384,9 @@ class LessonCreationService with WidgetsBindingObserver {
     }
   }
 
-  // CORRECTED: Transcode video to compatible format
   Future<File> transcodeVideoToCompatibleFormat(File originalVideo) async {
     try {
-      print('Starting video transcoding for compatibility...');
-
-      // Initialize video compression
       await VideoCompress.setLogLevel(0);
-
-      // CORRECTED: Use the proper compressVideo method without outputPath parameter
       final MediaInfo? mediaInfo = await VideoCompress.compressVideo(
         originalVideo.path,
         quality: VideoQuality.MediumQuality,
@@ -312,18 +398,14 @@ class LessonCreationService with WidgetsBindingObserver {
         throw Exception('Video transcoding failed');
       }
 
-      print('Video transcoding completed: ${mediaInfo.file!.path}');
-
-      // CORRECTED: The compressed file is already saved, we just need to return it
       return File(mediaInfo.file!.path);
     } catch (e) {
-      print('Video transcoding error: $e');
-      // If transcoding fails, return original file as fallback
       return originalVideo;
     }
   }
 
-  // Upload video to Supabase
+  // ========== UPLOAD & STORAGE ==========
+
   Future<String> uploadVideo({
     required String lessonId,
     required String educatorId,
@@ -331,47 +413,35 @@ class LessonCreationService with WidgetsBindingObserver {
     required Function(double) onProgress,
   }) async {
     try {
-      // Step 1: Transcode video first (30% of progress)
-      print('Starting video transcoding...');
       onProgress(0.1);
-
       final compatibleVideo = await transcodeVideoToCompatibleFormat(videoFile);
       onProgress(0.3);
 
-      // Step 2: Upload transcoded video (70% of progress)
       final fileName = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       final filePath = '$educatorId/$lessonId/$fileName';
 
-      print('Uploading transcoded video...');
-
-      // Upload with progress tracking
       await _client.storage.from('videos').uploadBinary(
             filePath,
             await compatibleVideo.readAsBytes(),
-            fileOptions: const FileOptions(
-              upsert: true,
-            ),
+            fileOptions: const FileOptions(upsert: true),
           );
 
       onProgress(1.0);
 
-      // Clean up temporary file
       try {
         if (compatibleVideo.path != videoFile.path) {
           await compatibleVideo.delete();
         }
       } catch (e) {
-        print('Could not delete temporary video file: $e');
+        debugPrint('Could not delete temporary video file: $e');
       }
 
       return _client.storage.from('videos').getPublicUrl(filePath);
     } catch (e) {
-      print('Video upload failed: $e');
       throw Exception('Failed to upload video: ${e.toString()}');
     }
   }
 
-  // Generate thumbnail
   Future<String?> generateThumbnail({
     required String lessonId,
     required String educatorId,
@@ -400,12 +470,12 @@ class LessonCreationService with WidgetsBindingObserver {
 
       return _client.storage.from('thumbnails').getPublicUrl(filePath);
     } catch (e) {
-      print('Thumbnail generation failed: $e');
       return null;
     }
   }
 
-  // Create lesson in database - UPDATED FOR PUBLISHING OPTIONS
+  // ========== DATABASE OPERATIONS ==========
+
   Future<String> createLesson({
     required String title,
     required String subject,
@@ -417,16 +487,13 @@ class LessonCreationService with WidgetsBindingObserver {
     DateTime? scheduledPublish,
   }) async {
     try {
-      // Determine the actual publish status
       final bool actualIsPublished;
       final String? actualScheduledPublish;
 
       if (scheduledPublish != null) {
-        // If scheduled for future, set as unpublished and store scheduled time
         actualIsPublished = false;
         actualScheduledPublish = scheduledPublish.toIso8601String();
       } else {
-        // If no schedule time, use the isPublished flag directly
         actualIsPublished = isPublished;
         actualScheduledPublish = null;
       }
@@ -445,19 +512,12 @@ class LessonCreationService with WidgetsBindingObserver {
       }).select('id');
 
       if (response.isEmpty) throw Exception('No ID returned');
-
-      final lessonId = response.first['id'] as String;
-      print(
-          'Lesson created with ID: $lessonId, Published: $actualIsPublished, Scheduled: $actualScheduledPublish');
-
-      return lessonId;
+      return response.first['id'] as String;
     } catch (e) {
-      print('Failed to create lesson: $e');
       throw Exception('Failed to create lesson: ${e.toString()}');
     }
   }
 
-  // Update lesson with media URLs
   Future<void> updateLessonMedia({
     required String lessonId,
     required String videoUrl,
@@ -474,200 +534,11 @@ class LessonCreationService with WidgetsBindingObserver {
       }
 
       await _client.from('lessons').update(updateData).eq('id', lessonId);
-      print('Lesson media updated for: $lessonId');
     } catch (e) {
-      print('Failed to update lesson media: $e');
       throw Exception('Failed to update lesson media: ${e.toString()}');
     }
   }
 
-  // NEW: Publish lesson immediately
-  Future<void> publishLessonNow(String lessonId) async {
-    try {
-      await _client.from('lessons').update({
-        'is_published': true,
-        'scheduled_publish': null, // Clear any scheduled time
-        'published_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', lessonId);
-
-      print('Lesson published immediately: $lessonId');
-    } catch (e) {
-      print('Failed to publish lesson: $e');
-      throw Exception('Failed to publish lesson: ${e.toString()}');
-    }
-  }
-
-  // NEW: Schedule lesson for later publication
-  Future<void> scheduleLesson({
-    required String lessonId,
-    required DateTime publishDate,
-  }) async {
-    try {
-      // Validate schedule time (must be in future)
-      if (publishDate.isBefore(DateTime.now())) {
-        throw Exception('Schedule time must be in the future');
-      }
-
-      await _client.from('lessons').update({
-        'is_published': false,
-        'scheduled_publish': publishDate.toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', lessonId);
-
-      print('Lesson scheduled for: $publishDate, ID: $lessonId');
-    } catch (e) {
-      print('Failed to schedule lesson: $e');
-      throw Exception('Failed to schedule lesson: ${e.toString()}');
-    }
-  }
-
-  // NEW: Get scheduled lessons that need to be published
-  Future<List<Map<String, dynamic>>> getLessonsToPublish() async {
-    try {
-      final now = DateTime.now().toIso8601String();
-
-      final response = await _client
-          .from('lessons')
-          .select('*')
-          .lt('scheduled_publish', now) // Less than current time
-          .eq('is_published', false);
-
-      return (response as List).cast<Map<String, dynamic>>();
-    } catch (e) {
-      print('Error getting lessons to publish: $e');
-      return [];
-    }
-  }
-
-  // NEW: Publish scheduled lessons (to be called by a background service)
-  Future<void> publishScheduledLessons() async {
-    try {
-      final lessonsToPublish = await getLessonsToPublish();
-
-      for (final lesson in lessonsToPublish) {
-        final lessonId = lesson['id'] as String;
-        await publishLessonNow(lessonId);
-        print('Auto-published scheduled lesson: $lessonId');
-      }
-    } catch (e) {
-      print('Error publishing scheduled lessons: $e');
-    }
-  }
-
-  // NEW: Update existing lesson's publishing status
-  Future<void> updateLessonPublishing({
-    required String lessonId,
-    bool? isPublished,
-    DateTime? scheduledPublish,
-  }) async {
-    try {
-      final updateData = <String, dynamic>{
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      if (isPublished != null) {
-        updateData['is_published'] = isPublished;
-        if (isPublished) {
-          updateData['published_at'] = DateTime.now().toIso8601String();
-          updateData['scheduled_publish'] =
-              null; // Clear schedule if publishing now
-        }
-      }
-
-      if (scheduledPublish != null) {
-        updateData['scheduled_publish'] = scheduledPublish.toIso8601String();
-        updateData['is_published'] =
-            false; // Ensure it's not published immediately
-      }
-
-      await _client.from('lessons').update(updateData).eq('id', lessonId);
-      print('Lesson publishing updated: $lessonId');
-    } catch (e) {
-      print('Failed to update lesson publishing: $e');
-      throw Exception('Failed to update lesson publishing: ${e.toString()}');
-    }
-  }
-
-  // ULTRA-FAST Lesson Creation Method - UPDATED FOR PUBLISHING OPTIONS
-  Future<void> createLessonUltraFast({
-    required String title,
-    required String subject,
-    required String grade,
-    required File videoFile,
-    required String educatorId,
-    String? description,
-    bool isPublished = false,
-    DateTime? scheduledPublish,
-    required Function(double) onProgress,
-  }) async {
-    try {
-      // Step 1: Quick validation (5%)
-      validateVideoFile(videoFile);
-      onProgress(0.05);
-
-      // Step 2: Get duration (10%) - with safe error handling
-      Duration duration;
-      try {
-        duration = await getVideoDuration(videoFile);
-      } catch (e) {
-        debugPrint('Duration detection failed, using default: $e');
-        duration = const Duration(seconds: 60); // Use default
-      }
-      onProgress(0.15);
-
-      // Step 3: Create lesson record (15%)
-      final lessonId = await createLesson(
-        title: title,
-        subject: subject,
-        grade: grade,
-        durationSeconds: duration.inSeconds,
-        educatorId: educatorId,
-        description: description,
-        isPublished: isPublished,
-        scheduledPublish: scheduledPublish,
-      );
-      onProgress(0.30);
-
-      // Step 4: Upload video and generate thumbnail in parallel (60%)
-      final results = await Future.wait([
-        uploadVideo(
-          lessonId: lessonId,
-          educatorId: educatorId,
-          videoFile: videoFile,
-          onProgress: (progress) {
-            onProgress(0.30 + (progress * 0.60));
-          },
-        ),
-        generateThumbnail(
-          lessonId: lessonId,
-          educatorId: educatorId,
-          videoFile: videoFile,
-        ),
-      ], eagerError: true);
-
-      final videoUrl = results[0] as String;
-      final thumbnailUrl = results[1] as String?;
-
-      // Step 5: Quick final update (10%)
-      await updateLessonMedia(
-        lessonId: lessonId,
-        videoUrl: videoUrl,
-        thumbnailUrl: thumbnailUrl,
-      );
-
-      onProgress(1.0);
-
-      print('Lesson creation completed: $lessonId');
-    } catch (e) {
-      await _cleanupCameraResources();
-      print('Lesson creation failed: $e');
-      rethrow;
-    }
-  }
-
-  // Get educator's grade
-  // Get educator's grade
   Future<String> getEducatorGrade(String educatorId) async {
     try {
       final response = await _client
@@ -681,7 +552,6 @@ class LessonCreationService with WidgetsBindingObserver {
     }
   }
 
-  // Get educator's subjects
   Future<List<String>> getEducatorSubjects(String educatorId) async {
     try {
       final response = await _client
@@ -708,47 +578,141 @@ class LessonCreationService with WidgetsBindingObserver {
     ];
   }
 
-  // NEW: Get lesson by ID
-  Future<Map<String, dynamic>?> getLesson(String lessonId) async {
-    try {
-      final response =
-          await _client.from('lessons').select('*').eq('id', lessonId).single();
+  // ========== ULTRA-FAST LESSON CREATION ==========
 
-      return response as Map<String, dynamic>?;
+  Future<void> createLessonUltraFast({
+    required String title,
+    required String subject,
+    required String grade,
+    required File videoFile,
+    required String educatorId,
+    String? description,
+    bool isPublished = false,
+    DateTime? scheduledPublish,
+    required Function(double) onProgress,
+  }) async {
+    try {
+      validateVideoFile(videoFile);
+      onProgress(0.05);
+
+      Duration duration;
+      try {
+        duration = await getVideoDuration(videoFile);
+      } catch (e) {
+        duration = const Duration(seconds: 60);
+      }
+      onProgress(0.15);
+
+      final lessonId = await createLesson(
+        title: title,
+        subject: subject,
+        grade: grade,
+        durationSeconds: duration.inSeconds,
+        educatorId: educatorId,
+        description: description,
+        isPublished: isPublished,
+        scheduledPublish: scheduledPublish,
+      );
+      onProgress(0.30);
+
+      final results = await Future.wait([
+        uploadVideo(
+          lessonId: lessonId,
+          educatorId: educatorId,
+          videoFile: videoFile,
+          onProgress: (progress) {
+            onProgress(0.30 + (progress * 0.60));
+          },
+        ),
+        generateThumbnail(
+          lessonId: lessonId,
+          educatorId: educatorId,
+          videoFile: videoFile,
+        ),
+      ], eagerError: true);
+
+      final videoUrl = results[0] as String;
+      final thumbnailUrl = results[1] as String?;
+
+      await updateLessonMedia(
+        lessonId: lessonId,
+        videoUrl: videoUrl,
+        thumbnailUrl: thumbnailUrl,
+      );
+
+      onProgress(1.0);
     } catch (e) {
-      print('Error getting lesson: $e');
-      return null;
+      rethrow;
     }
   }
 
-  // NEW: Check if lesson is scheduled
-  Future<bool> isLessonScheduled(String lessonId) async {
+  // ========== GETTERS - EXACTLY LIKE VideoUploadService ==========
+
+  double get currentZoomLevel => _currentZoomLevel;
+  bool get isFrontCamera => _isFrontCamera;
+  bool get isCameraInitialized => _isCameraInitialized;
+  bool get isRecording => _isRecording;
+  Duration get recordingDuration => _recordingDuration;
+  camera_package.CameraController? get cameraController => _cameraController;
+
+  // ========== UTILITIES ==========
+
+  String formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
+  }
+
+  Future<int> getFileSize(File file) async => await file.length();
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1048576).toStringAsFixed(1)} MB';
+  }
+
+  Future<Map<String, dynamic>> getFileInfo(File file) async {
     try {
-      final lesson = await getLesson(lessonId);
-      if (lesson == null) return false;
+      final exists = await file.exists();
+      final size = exists ? await file.length() : 0;
+      final path = file.path;
+      final extension = path.split('.').last.toLowerCase();
 
-      final scheduledPublish = lesson['scheduled_publish'];
-      final isPublished = lesson['is_published'] as bool? ?? false;
-
-      return scheduledPublish != null && !isPublished;
+      return {
+        'exists': exists,
+        'size': size,
+        'path': path,
+        'extension': extension,
+        'filename': path.split('/').last,
+      };
     } catch (e) {
-      return false;
+      return {'error': e.toString()};
     }
   }
 
-  // NEW: Get scheduled publish time
-  Future<DateTime?> getScheduledPublishTime(String lessonId) async {
+  Future<void> debugStorageAccess() async {
     try {
-      final lesson = await getLesson(lessonId);
-      if (lesson == null) return null;
-
-      final scheduledPublish = lesson['scheduled_publish'];
-      if (scheduledPublish == null) return null;
-
-      return DateTime.parse(scheduledPublish as String);
+      debugPrint('=== STORAGE DEBUG INFO ===');
+      final listResult = await _client.storage.from('videos').list();
+      debugPrint('Bucket list success: ${listResult.length} items');
+      debugPrint('=== END DEBUG INFO ===');
     } catch (e) {
-      return null;
+      debugPrint('=== STORAGE DEBUG ERROR ===');
+      debugPrint('Error: $e');
+      debugPrint('Error type: ${e.runtimeType}');
+      debugPrint('=== END DEBUG INFO ===');
+      rethrow;
     }
+  }
+
+  Future<void> debugPermissions() async {
+    debugPrint('=== PERMISSION DEBUG ===');
+    debugPrint('Storage: ${await Permission.storage.status}');
+    debugPrint('Photos: ${await Permission.photos.status}');
+    debugPrint('Camera: ${await Permission.camera.status}');
+    debugPrint('Microphone: ${await Permission.microphone.status}');
+    debugPrint('=== END DEBUG ===');
   }
 
   void dispose() {
